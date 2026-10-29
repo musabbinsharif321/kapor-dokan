@@ -1,0 +1,292 @@
+import {
+  Product,
+  Customer,
+  Supplier,
+  SalesOrder,
+  SalesInvoice,
+  PurchaseInvoice,
+  Expense,
+  StoreSettings,
+} from './types';
+
+export const SAMPLE_PRODUCTS: Omit<Product, 'id' | 'ownerId' | 'createdAt' | 'updatedAt'>[] = [
+  {
+    name: 'Slim Fit Stretch Denim Pant',
+    sku: 'PNT-32-IND',
+    category: 'Pant',
+    size: '32',
+    color: 'Indigo Blue',
+    purchasePrice: 780,
+    sellingPrice: 1350,
+    stock: 24,
+    minStockAlert: 5,
+  },
+  {
+    name: 'Vintage Wash Selvedge Pant',
+    sku: 'PNT-34-BLK',
+    category: 'Pant',
+    size: '34',
+    color: 'Jet Black',
+    purchasePrice: 820,
+    sellingPrice: 1450,
+    stock: 4,
+    minStockAlert: 6,
+  },
+  {
+    name: 'Egyptian Cotton Oxford Shirt',
+    sku: 'SHT-L-WHT',
+    category: 'Shirt',
+    size: 'L',
+    color: 'Crisp White',
+    purchasePrice: 650,
+    sellingPrice: 1190,
+    stock: 18,
+    minStockAlert: 5,
+  },
+  {
+    name: 'Pique Knit Classic Polo Shirt',
+    sku: 'PLO-XL-NVY',
+    category: 'Polo Shirt',
+    size: 'XL',
+    color: 'Navy Blue',
+    purchasePrice: 420,
+    sellingPrice: 790,
+    stock: 30,
+    minStockAlert: 8,
+  },
+  {
+    name: 'Heavyweight Drop-Shoulder T-Shirt',
+    sku: 'TSH-M-OLV',
+    category: 'T-Shirt',
+    size: 'M',
+    color: 'Olive Green',
+    purchasePrice: 280,
+    sellingPrice: 550,
+    stock: 35,
+    minStockAlert: 10,
+  },
+  {
+    name: 'Chino Twill Cargo Half Pant',
+    sku: 'HPN-32-KHK',
+    category: 'Half Pant',
+    size: '32',
+    color: 'Sand Khaki',
+    purchasePrice: 360,
+    sellingPrice: 680,
+    stock: 15,
+    minStockAlert: 5,
+  },
+  {
+    name: 'Athletic Terry Jogger Trouser',
+    sku: 'TRS-L-GRY',
+    category: 'Trouser',
+    size: 'L',
+    color: 'Heather Grey',
+    purchasePrice: 440,
+    sellingPrice: 850,
+    stock: 20,
+    minStockAlert: 6,
+  },
+  {
+    name: 'Tailored Gabardine Formal Pant',
+    sku: 'FPN-34-CHR',
+    category: 'Formal Pant',
+    size: '34',
+    color: 'Charcoal',
+    purchasePrice: 720,
+    sellingPrice: 1290,
+    stock: 3,
+    minStockAlert: 5,
+  },
+  {
+    name: 'Brushed Fleece Crewneck Sweatshirt',
+    sku: 'SWT-XL-MRN',
+    category: 'Sweatshirt',
+    size: 'XL',
+    color: 'Deep Maroon',
+    purchasePrice: 620,
+    sellingPrice: 1150,
+    stock: 14,
+    minStockAlert: 4,
+  },
+  {
+    name: 'Linen Blend Summer Half Shirt',
+    sku: 'HSH-L-SKY',
+    category: 'Half Shirt',
+    size: 'L',
+    color: 'Sky Blue',
+    purchasePrice: 520,
+    sellingPrice: 950,
+    stock: 19,
+    minStockAlert: 5,
+  },
+];
+
+export const SAMPLE_CUSTOMERS: Omit<Customer, 'id' | 'ownerId' | 'createdAt' | 'updatedAt'>[] = [
+  {
+    name: 'Tanvir Ahmed',
+    phone: '01711-482910',
+    address: 'Uttara Sector 7, Dhaka',
+    totalSales: 4820,
+    totalDue: 820,
+  },
+  {
+    name: 'Mahmudul Hasan',
+    phone: '01819-339104',
+    address: 'Dhanmondi 27, Dhaka',
+    totalSales: 3140,
+    totalDue: 0,
+  },
+  {
+    name: 'Kamrul Fashion House (Wholesale)',
+    phone: '01912-885421',
+    address: 'New Market, Chattogram',
+    totalSales: 14500,
+    totalDue: 3500,
+  },
+];
+
+export const SAMPLE_SUPPLIERS: Omit<Supplier, 'id' | 'ownerId' | 'createdAt' | 'updatedAt'>[] = [
+  {
+    name: 'Haji Abdul Karim',
+    companyName: 'Dhaka Denim & Apparels Ltd.',
+    phone: '01713-900112',
+    address: 'Mirpur-11 Garments Zone, Dhaka',
+    totalPurchased: 48000,
+    totalPayable: 8000,
+  },
+  {
+    name: 'Rafiqul Islam',
+    companyName: 'Narayanganj Knit & Polo Mills',
+    phone: '01811-224598',
+    address: 'Chashara, Narayanganj',
+    totalPurchased: 32500,
+    totalPayable: 0,
+  },
+];
+
+export function getSampleSalesOrders(today: string): Omit<SalesOrder, 'id' | 'ownerId' | 'createdAt' | 'updatedAt'>[] {
+  return [
+    {
+      orderNumber: 'SO-1001',
+      customerId: 'cust_sample_3',
+      customerName: 'Kamrul Fashion House (Wholesale)',
+      itemsSummary: '10x Polo Shirt (XL) · 8x Slim Fit Stretch Denim Pant (32)',
+      itemsCount: 18,
+      totalAmount: 18700,
+      status: 'Confirmed',
+      orderDate: today,
+      notes: 'Deliver via Sundarban Courier by Thursday evening',
+    },
+    {
+      orderNumber: 'SO-1002',
+      customerId: 'cust_sample_1',
+      customerName: 'Tanvir Ahmed',
+      itemsSummary: '2x Linen Blend Summer Half Shirt (L) · 1x Formal Pant (34)',
+      itemsCount: 3,
+      totalAmount: 3190,
+      status: 'Pending',
+      orderDate: today,
+      notes: 'Customer will pick up from showroom after 6 PM',
+    },
+  ];
+}
+
+export function getSampleSalesInvoices(today: string): Omit<SalesInvoice, 'id' | 'ownerId' | 'createdAt' | 'updatedAt'>[] {
+  return [
+    {
+      invoiceNumber: 'INV-2041',
+      customerId: 'cust_sample_1',
+      customerName: 'Tanvir Ahmed',
+      customerPhone: '01711-482910',
+      itemsSummary: '2x Slim Fit Stretch Denim Pant (32) @ ৳1350 · 2x Pique Knit Classic Polo Shirt (XL) @ ৳790 · 1x Heavyweight Drop-Shoulder T-Shirt (M) @ ৳550',
+      primaryCategory: 'Pant',
+      itemsCount: 5,
+      totalCost: 2680,
+      subtotal: 4830,
+      discount: 10,
+      grandTotal: 4820,
+      paidAmount: 4000,
+      dueAmount: 820,
+      paymentMethod: 'bKash',
+      status: 'Partial',
+      invoiceDate: today,
+    },
+    {
+      invoiceNumber: 'INV-2042',
+      customerId: 'cust_sample_2',
+      customerName: 'Mahmudul Hasan',
+      customerPhone: '01819-339104',
+      itemsSummary: '1x Egyptian Cotton Oxford Shirt (L) @ ৳1190 · 1x Brushed Fleece Crewneck Sweatshirt (XL) @ ৳1150 · 1x Athletic Terry Jogger Trouser (L) @ ৳850',
+      primaryCategory: 'Shirt',
+      itemsCount: 3,
+      totalCost: 1710,
+      subtotal: 3190,
+      discount: 50,
+      grandTotal: 3140,
+      paidAmount: 3140,
+      dueAmount: 0,
+      paymentMethod: 'Cash',
+      status: 'Paid',
+      invoiceDate: today,
+    },
+  ];
+}
+
+export function getSamplePurchaseInvoices(today: string): Omit<PurchaseInvoice, 'id' | 'ownerId' | 'createdAt' | 'updatedAt'>[] {
+  return [
+    {
+      invoiceNumber: 'PUR-501',
+      supplierId: 'sup_sample_1',
+      supplierName: 'Dhaka Denim & Apparels Ltd.',
+      itemsSummary: '30x Slim Fit Stretch Denim Pant (32) @ ৳780 · 20x Tailored Gabardine Formal Pant (34) @ ৳720',
+      itemsCount: 50,
+      totalAmount: 37800,
+      paidAmount: 29800,
+      dueAmount: 8000,
+      paymentMethod: 'Cash',
+      status: 'Partial',
+      purchaseDate: today,
+    },
+  ];
+}
+
+export function getSampleExpenses(today: string): Omit<Expense, 'id' | 'ownerId' | 'createdAt' | 'updatedAt'>[] {
+  return [
+    {
+      title: 'Showroom Electricity & Generator Bill',
+      category: 'Electricity',
+      amount: 1450,
+      paymentMethod: 'bKash',
+      expenseDate: today,
+      notes: 'Monthly DESCO prepaid token recharge',
+    },
+    {
+      title: 'Printed Shopping Bags & Hangers (500 pcs)',
+      category: 'Packaging',
+      amount: 920,
+      paymentMethod: 'Cash',
+      expenseDate: today,
+      notes: 'Branded non-woven carry bags',
+    },
+    {
+      title: 'Staff Evening Tea & Snacks',
+      category: 'Refreshment',
+      amount: 240,
+      paymentMethod: 'Cash',
+      expenseDate: today,
+      notes: '3 sales associates on floor shift',
+    },
+  ];
+}
+
+export const DEFAULT_STORE_SETTINGS: Omit<StoreSettings, 'id' | 'ownerId' | 'createdAt' | 'updatedAt'> = {
+  storeName: 'ThreadCraft Menswear & Co.',
+  tagline: 'Premium Denim, Shirts, Polos & Formal Attire',
+  phone: '+880 1711-009988',
+  email: 'sales@threadcraftbd.com',
+  address: 'Shop #204, Level 2, Bashundhara City Shopping Mall, Dhaka',
+  currencySymbol: '৳',
+  invoiceFooterNote: 'Exchange allowed within 7 days with original tag & receipt. Thank you for shopping with us!',
+  lowStockDefault: 5,
+};

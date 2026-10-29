@@ -1,0 +1,829 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "An apparel product item in the clothing store inventory.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the garment item",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "sku": {
+          "type": "string",
+          "description": "Unique stock keeping unit code",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "category": {
+          "type": "string",
+          "description": "Garment category (default or custom category)",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "size": {
+          "type": "string",
+          "description": "Garment size (S, M, L, XL, XXL, 28-38, Free)",
+          "minLength": 1,
+          "maxLength": 20
+        },
+        "color": {
+          "type": "string",
+          "description": "Garment color variant",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "purchasePrice": {
+          "type": "number",
+          "description": "Unit purchase cost in BDT"
+        },
+        "sellingPrice": {
+          "type": "number",
+          "description": "Unit retail selling price in BDT"
+        },
+        "stock": {
+          "type": "number",
+          "description": "Current stock quantity in units"
+        },
+        "minStockAlert": {
+          "type": "number",
+          "description": "Minimum stock level before low-stock warning triggers"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the store owner",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "name",
+        "sku",
+        "category",
+        "size",
+        "color",
+        "purchasePrice",
+        "sellingPrice",
+        "stock",
+        "minStockAlert",
+        "ownerId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Custom garment category created by the store owner.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Category display name in English or Bengali",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "bengaliLabel": {
+          "type": "string",
+          "description": "Optional subtitle or Bengali label",
+          "maxLength": 60
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the store owner",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": ["name", "bengaliLabel", "ownerId", "createdAt", "updatedAt"]
+    },
+    "InventoryLog": {
+      "title": "InventoryLog",
+      "description": "Audit history log entry recorded whenever an inventory item is edited or deleted.",
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "Type of inventory modification",
+          "enum": ["EDIT", "DELETE"],
+          "maxLength": 20
+        },
+        "productName": {
+          "type": "string",
+          "description": "Name of the affected product",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "sku": {
+          "type": "string",
+          "description": "SKU of the affected product",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "category": {
+          "type": "string",
+          "description": "Category of the affected product",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "details": {
+          "type": "string",
+          "description": "Summary of changes made (e.g. before and after stock/price)",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "timestampStr": {
+          "type": "string",
+          "description": "Formatted date and time of the action",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the store owner",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "action",
+        "productName",
+        "sku",
+        "category",
+        "details",
+        "timestampStr",
+        "ownerId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "A retail or wholesale customer with purchase and due (Baki) ledger.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Customer full name",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "phone": {
+          "type": "string",
+          "description": "Customer mobile number",
+          "minLength": 1,
+          "maxLength": 30
+        },
+        "address": {
+          "type": "string",
+          "description": "Customer address or area",
+          "maxLength": 200
+        },
+        "totalSales": {
+          "type": "number",
+          "description": "Cumulative sales billed to this customer in BDT"
+        },
+        "totalDue": {
+          "type": "number",
+          "description": "Current unpaid due (Baki) balance in BDT"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the store owner",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "name",
+        "phone",
+        "address",
+        "totalSales",
+        "totalDue",
+        "ownerId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SalesOrder": {
+      "title": "SalesOrder",
+      "description": "A customer sales order booking prior to or linked with invoicing.",
+      "type": "object",
+      "properties": {
+        "orderNumber": {
+          "type": "string",
+          "description": "Human-readable order reference number",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "customerId": {
+          "type": "string",
+          "description": "Reference ID of the customer",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "customerName": {
+          "type": "string",
+          "description": "Customer display name",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "itemsSummary": {
+          "type": "string",
+          "description": "Summary string of ordered items and quantities",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "itemsCount": {
+          "type": "number",
+          "description": "Total quantity of garment units in this order"
+        },
+        "totalAmount": {
+          "type": "number",
+          "description": "Total order value in BDT"
+        },
+        "status": {
+          "type": "string",
+          "description": "Order fulfillment status",
+          "enum": ["Pending", "Confirmed", "Invoiced", "Cancelled"],
+          "maxLength": 20
+        },
+        "orderDate": {
+          "type": "string",
+          "description": "ISO date string YYYY-MM-DD",
+          "minLength": 1,
+          "maxLength": 30
+        },
+        "notes": {
+          "type": "string",
+          "description": "Delivery or order notes",
+          "maxLength": 300
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the store owner",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "orderNumber",
+        "customerId",
+        "customerName",
+        "itemsSummary",
+        "itemsCount",
+        "totalAmount",
+        "status",
+        "orderDate",
+        "notes",
+        "ownerId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SalesInvoice": {
+      "title": "SalesInvoice",
+      "description": "A completed retail or wholesale sales bill with payment and due details.",
+      "type": "object",
+      "properties": {
+        "invoiceNumber": {
+          "type": "string",
+          "description": "Human-readable invoice number",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "customerId": {
+          "type": "string",
+          "description": "Customer ID or WALK_IN",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "customerName": {
+          "type": "string",
+          "description": "Customer name on invoice",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "customerPhone": {
+          "type": "string",
+          "description": "Customer phone on invoice",
+          "maxLength": 30
+        },
+        "itemsSummary": {
+          "type": "string",
+          "description": "Formatted breakdown of billed items (SKU, Name, Size, Qty, Price)",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "primaryCategory": {
+          "type": "string",
+          "description": "Primary garment category of the sale for reporting",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "itemsCount": {
+          "type": "number",
+          "description": "Total units sold in this invoice"
+        },
+        "totalCost": {
+          "type": "number",
+          "description": "Total purchase cost (COGS) of sold items in BDT"
+        },
+        "subtotal": {
+          "type": "number",
+          "description": "Subtotal before discount in BDT"
+        },
+        "discount": {
+          "type": "number",
+          "description": "Discount amount in BDT"
+        },
+        "grandTotal": {
+          "type": "number",
+          "description": "Net payable total in BDT"
+        },
+        "paidAmount": {
+          "type": "number",
+          "description": "Amount paid by customer in BDT"
+        },
+        "dueAmount": {
+          "type": "number",
+          "description": "Remaining unpaid due amount in BDT"
+        },
+        "paymentMethod": {
+          "type": "string",
+          "description": "Payment channel used",
+          "enum": ["Cash", "bKash", "Nagad", "Card"],
+          "maxLength": 20
+        },
+        "status": {
+          "type": "string",
+          "description": "Payment status of invoice",
+          "enum": ["Paid", "Partial", "Due"],
+          "maxLength": 20
+        },
+        "invoiceDate": {
+          "type": "string",
+          "description": "Date of invoice YYYY-MM-DD",
+          "minLength": 1,
+          "maxLength": 30
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the store owner",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "invoiceNumber",
+        "customerId",
+        "customerName",
+        "customerPhone",
+        "itemsSummary",
+        "primaryCategory",
+        "itemsCount",
+        "totalCost",
+        "subtotal",
+        "discount",
+        "grandTotal",
+        "paidAmount",
+        "dueAmount",
+        "paymentMethod",
+        "status",
+        "invoiceDate",
+        "ownerId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "A garment manufacturer or wholesale supplier.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Contact person name",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "companyName": {
+          "type": "string",
+          "description": "Factory or wholesale business name",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "phone": {
+          "type": "string",
+          "description": "Supplier phone number",
+          "minLength": 1,
+          "maxLength": 30
+        },
+        "address": {
+          "type": "string",
+          "description": "Supplier market or factory address",
+          "maxLength": 200
+        },
+        "totalPurchased": {
+          "type": "number",
+          "description": "Total amount purchased from this supplier in BDT"
+        },
+        "totalPayable": {
+          "type": "number",
+          "description": "Current unpaid balance owed to this supplier in BDT"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the store owner",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "name",
+        "companyName",
+        "phone",
+        "address",
+        "totalPurchased",
+        "totalPayable",
+        "ownerId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PurchaseInvoice": {
+      "title": "PurchaseInvoice",
+      "description": "A stock restock purchase invoice from a supplier.",
+      "type": "object",
+      "properties": {
+        "invoiceNumber": {
+          "type": "string",
+          "description": "Purchase voucher or invoice number",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "supplierId": {
+          "type": "string",
+          "description": "Reference ID of the supplier",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "supplierName": {
+          "type": "string",
+          "description": "Supplier company/contact name",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "itemsSummary": {
+          "type": "string",
+          "description": "Summary of restocked products and quantities",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "itemsCount": {
+          "type": "number",
+          "description": "Total garment units purchased"
+        },
+        "totalAmount": {
+          "type": "number",
+          "description": "Total purchase bill in BDT"
+        },
+        "paidAmount": {
+          "type": "number",
+          "description": "Amount paid to supplier in BDT"
+        },
+        "dueAmount": {
+          "type": "number",
+          "description": "Remaining payable due to supplier in BDT"
+        },
+        "paymentMethod": {
+          "type": "string",
+          "description": "Payment method used",
+          "enum": ["Cash", "bKash", "Nagad", "Card"],
+          "maxLength": 20
+        },
+        "status": {
+          "type": "string",
+          "description": "Payment status",
+          "enum": ["Paid", "Partial", "Due"],
+          "maxLength": 20
+        },
+        "purchaseDate": {
+          "type": "string",
+          "description": "Date of purchase YYYY-MM-DD",
+          "minLength": 1,
+          "maxLength": 30
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the store owner",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "invoiceNumber",
+        "supplierId",
+        "supplierName",
+        "itemsSummary",
+        "itemsCount",
+        "totalAmount",
+        "paidAmount",
+        "dueAmount",
+        "paymentMethod",
+        "status",
+        "purchaseDate",
+        "ownerId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "A daily operational store expense record.",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Short description of the expense",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "category": {
+          "type": "string",
+          "description": "Expense classification",
+          "enum": [
+            "Rent",
+            "Electricity",
+            "Salary",
+            "Transport",
+            "Packaging",
+            "Refreshment",
+            "Other"
+          ],
+          "maxLength": 30
+        },
+        "amount": {
+          "type": "number",
+          "description": "Expense amount in BDT"
+        },
+        "paymentMethod": {
+          "type": "string",
+          "description": "Payment channel",
+          "enum": ["Cash", "bKash", "Nagad", "Card"],
+          "maxLength": 20
+        },
+        "expenseDate": {
+          "type": "string",
+          "description": "Expense date YYYY-MM-DD",
+          "minLength": 1,
+          "maxLength": 30
+        },
+        "notes": {
+          "type": "string",
+          "description": "Additional remarks",
+          "maxLength": 250
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the store owner",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "title",
+        "category",
+        "amount",
+        "paymentMethod",
+        "expenseDate",
+        "notes",
+        "ownerId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "StoreSettings": {
+      "title": "StoreSettings",
+      "description": "Store profile, contact details, and invoice configuration.",
+      "type": "object",
+      "properties": {
+        "storeName": {
+          "type": "string",
+          "description": "Display name of the clothing store",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "tagline": {
+          "type": "string",
+          "description": "Store subtitle or specialization",
+          "maxLength": 150
+        },
+        "phone": {
+          "type": "string",
+          "description": "Store contact phone number",
+          "minLength": 1,
+          "maxLength": 30
+        },
+        "email": {
+          "type": "string",
+          "description": "Store contact email",
+          "maxLength": 100
+        },
+        "address": {
+          "type": "string",
+          "description": "Physical showroom address",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "currencySymbol": {
+          "type": "string",
+          "description": "Currency symbol (default ৳)",
+          "minLength": 1,
+          "maxLength": 10
+        },
+        "invoiceFooterNote": {
+          "type": "string",
+          "description": "Terms or thank-you message printed on invoices",
+          "maxLength": 300
+        },
+        "lowStockDefault": {
+          "type": "number",
+          "description": "Default minimum stock threshold for new items"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the store owner",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "storeName",
+        "tagline",
+        "phone",
+        "email",
+        "address",
+        "currencySymbol",
+        "invoiceFooterNote",
+        "lowStockDefault",
+        "ownerId",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Apparel inventory items scoped to ownerId"
+    },
+    "/categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/Category" },
+      "description": "Custom garment categories scoped to ownerId"
+    },
+    "/inventoryLogs/{logId}": {
+      "schema": { "$ref": "#/entities/InventoryLog" },
+      "description": "Inventory edit and delete audit history logs scoped to ownerId"
+    },
+    "/customers/{customerId}": {
+      "schema": { "$ref": "#/entities/Customer" },
+      "description": "Customer profiles and due balances scoped to ownerId"
+    },
+    "/salesOrders/{orderId}": {
+      "schema": { "$ref": "#/entities/SalesOrder" },
+      "description": "Customer sales orders scoped to ownerId"
+    },
+    "/salesInvoices/{invoiceId}": {
+      "schema": { "$ref": "#/entities/SalesInvoice" },
+      "description": "Sales invoices and POS receipts scoped to ownerId"
+    },
+    "/suppliers/{supplierId}": {
+      "schema": { "$ref": "#/entities/Supplier" },
+      "description": "Garment suppliers and payable balances scoped to ownerId"
+    },
+    "/purchaseInvoices/{purchaseId}": {
+      "schema": { "$ref": "#/entities/PurchaseInvoice" },
+      "description": "Supplier purchase restock invoices scoped to ownerId"
+    },
+    "/expenses/{expenseId}": {
+      "schema": { "$ref": "#/entities/Expense" },
+      "description": "Daily operational store expenses scoped to ownerId"
+    },
+    "/storeSettings/{settingId}": {
+      "schema": { "$ref": "#/entities/StoreSettings" },
+      "description": "Store configuration document where settingId equals ownerId"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "ThreadCraft Apparel ERP",
+  "description": "Mobile-first (iPhone) and desktop ERP & POS system for menswear and clothing stores with Firebase backend, variant inventory, sales & purchase ledgers, daily expenses, and financial reports.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
