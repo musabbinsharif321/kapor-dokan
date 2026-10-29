@@ -487,7 +487,11 @@ export function NavigationShell({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Scrollable Workspace Viewport */}
-        <main className="flex-1 px-3 sm:px-6 lg:px-8 py-4 sm:py-5 pb-32 sm:pb-28 lg:pb-10 max-w-7xl w-full mx-auto">
+        <main
+          className={`flex-1 px-3 sm:px-6 lg:px-8 py-4 sm:py-5 pb-32 sm:pb-28 lg:pb-10 max-w-7xl w-full mx-auto ${
+            printableReceipt ? 'print:hidden' : ''
+          }`}
+        >
           {children}
         </main>
 
@@ -578,8 +582,8 @@ export function NavigationShell({ children }: { children: React.ReactNode }) {
 
       {/* Printable Receipt / AirPrint Invoice Modal */}
       {printableReceipt && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl border border-slate-200 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 print:static print:bg-white print:p-0">
+          <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl border border-slate-200 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col print:border-none print:shadow-none print:w-[58mm] print:max-w-[58mm] print:max-h-none print:overflow-visible">
             {/* Drag Handle for iPhone */}
             <div className="w-10 h-1.5 bg-slate-300 rounded-full mx-auto mt-3 sm:hidden print:hidden" />
 

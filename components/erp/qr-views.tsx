@@ -48,12 +48,137 @@ export function SingleProductQrModal({ product, onClose }: SingleProductQrModalP
   if (!product) return null;
 
   const handlePrint = () => {
-    window.print();
+    const brandName = storeSettings.storeName || 'NEXT FIT';
+    const priceFormatted = `${sym}${Number(product.sellingPrice).toLocaleString()}`;
+
+    // Open clean, isolated print window strictly sized for 58mm / thermal label
+    const printWindow = window.open('', '_blank', 'width=380,height=450');
+    if (!printWindow) {
+      window.print();
+      return;
+    }
+
+    printWindow.document.write(`<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>${product.name} - NEXT FIT Label</title>
+    <style>
+      @page {
+        size: 58mm 40mm;
+        margin: 0;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      html, body {
+        width: 100%;
+        margin: 0;
+        padding: 1.5mm;
+        background: #fff;
+        color: #000;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+      .label-card {
+        width: 52mm;
+        max-width: 52mm;
+        border: 1.5px solid #000;
+        border-radius: 4px;
+        padding: 1.8mm 2mm;
+        text-align: center;
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+      .brand-title {
+        font-size: 11px;
+        font-weight: 900;
+        letter-spacing: 0.8px;
+        text-transform: uppercase;
+        border-bottom: 1px dashed #555;
+        padding-bottom: 1.5px;
+        margin-bottom: 2px;
+      }
+      .item-title {
+        font-size: 10px;
+        font-weight: 700;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-bottom: 2px;
+      }
+      .qr-wrapper {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        margin: 1px 0;
+      }
+      .qr-img {
+        width: 25mm;
+        height: 25mm;
+        display: block;
+        object-fit: contain;
+      }
+      .specs-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 8.5px;
+        font-weight: 600;
+        margin-top: 1.5px;
+        padding: 0 1px;
+      }
+      .price-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 9px;
+        font-family: monospace;
+        border-top: 1px solid #000;
+        padding-top: 2px;
+        margin-top: 2px;
+      }
+      .price-tag {
+        font-size: 12px;
+        font-weight: 900;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="label-card">
+      <div class="brand-title">${brandName}</div>
+      <div class="item-title">${product.name}</div>
+      <div class="qr-wrapper">
+        <img src="${qrUrl}" class="qr-img" alt="QR" />
+      </div>
+      <div class="specs-row">
+        <span>${product.category}</span>
+        <span>Size: <strong>${product.size}</strong></span>
+        <span>${product.color}</span>
+      </div>
+      <div class="price-row">
+        <span>${product.sku}</span>
+        <span class="price-tag">${priceFormatted}</span>
+      </div>
+    </div>
+    <script>
+      window.onload = function() {
+        window.focus();
+        window.print();
+        setTimeout(function() { window.close(); }, 600);
+      };
+    </script>
+  </body>
+</html>`);
+    printWindow.document.close();
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-sm rounded-2xl border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+    <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 print:static print:bg-white print:p-0">
+      <div className="bg-white w-full max-w-sm rounded-2xl border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 print:border-none print:shadow-none print:w-auto print:max-w-none">
         <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between print:hidden">
           <div className="flex items-center gap-2">
             <QrCode className="w-5 h-5 text-blue-600" />
@@ -68,14 +193,14 @@ export function SingleProductQrModal({ product, onClose }: SingleProductQrModalP
         </div>
 
         {/* Printable Sticker Box (Designed for standard 50x30mm thermal or tag print) */}
-        <div className="p-6 flex flex-col items-center justify-center text-center">
+        <div className="p-6 flex flex-col items-center justify-center text-center print:p-0">
           <div
             id="single-qr-sticker"
-            className="w-full max-w-[280px] p-4 bg-white border-2 border-slate-900 rounded-xl space-y-2 text-slate-900 shadow-sm print:border-black print:shadow-none print:w-[50mm] print:h-[35mm] print:p-2"
+            className="w-full max-w-[280px] p-4 bg-white border-2 border-slate-900 rounded-xl space-y-2 text-slate-900 shadow-sm print:border-black print:shadow-none print:w-[52mm] print:h-auto print:p-2 print:m-0 print:break-inside-avoid"
           >
             <div className="border-b border-dashed border-slate-300 pb-1.5 print:pb-1">
               <p className="font-extrabold text-xs uppercase tracking-wider text-slate-900 print:text-[10px]">
-                {storeSettings.storeName || 'ThreadCraft'}
+                {storeSettings.storeName || 'NEXT FIT'}
               </p>
               <p className="font-bold text-sm text-slate-900 truncate mt-0.5 print:text-xs">
                 {product.name}
