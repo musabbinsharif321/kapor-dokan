@@ -37,12 +37,22 @@ export function SingleProductQrModal({ product, onClose }: SingleProductQrModalP
   const sym = storeSettings.currencySymbol || '৳';
 
   useEffect(() => {
+    let active = true;
     if (!product) {
-      setQrUrl('');
-      return;
+      Promise.resolve('').then((val) => {
+        if (active) setQrUrl(val);
+      });
+      return () => {
+        active = false;
+      };
     }
     const payload = encodeProductQr(product.sku);
-    generateQrDataUrl(payload, { width: 300, margin: 1 }).then(setQrUrl);
+    generateQrDataUrl(payload, { width: 300, margin: 1 }).then((url) => {
+      if (active) setQrUrl(url);
+    });
+    return () => {
+      active = false;
+    };
   }, [product]);
 
   if (!product) return null;
