@@ -490,7 +490,7 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     await signOut(auth);
-    showToast('Signed out of ThreadCraft ERP', 'info');
+    showToast('Signed out of NEXT FIT ERP', 'info');
   };
 
   const seedSampleData = async () => {
@@ -1489,7 +1489,7 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
     if (!user) return;
     const uid = user.uid;
     const payload = {
-      storeName: data.storeName.trim().slice(0, 100) || 'ThreadCraft Menswear',
+      storeName: data.storeName.trim().slice(0, 100) || 'NEXT FIT',
       tagline: data.tagline.trim().slice(0, 150),
       phone: data.phone.trim().slice(0, 30) || '+880 1700-000000',
       email: data.email.trim().slice(0, 100),

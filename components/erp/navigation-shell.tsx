@@ -94,17 +94,25 @@ export function NavigationShell({ children }: { children: React.ReactNode }) {
   const renderSidebarContent = () => (
     <div className="flex flex-col h-full bg-slate-900 text-slate-200 select-none">
       {/* Store Brand Header */}
-      <div className="flex items-center justify-between px-5 h-16 border-b border-slate-800 shrink-0">
+      <div className="flex items-center justify-between px-4 h-16 border-b border-slate-800 shrink-0">
         <button
           onClick={() => handleSelectModule('dashboard')}
-          className="text-left focus:outline-none group min-h-[44px] flex flex-col justify-center"
+          className="text-left focus:outline-none group min-h-[44px] flex items-center gap-3"
         >
-          <span className="font-bold text-base tracking-tight text-white group-hover:text-blue-400 transition-colors truncate max-w-[190px]">
-            {storeSettings.storeName || 'ThreadCraft ERP'}
-          </span>
-          <span className="text-[11px] text-slate-400 truncate max-w-[190px]">
-            Menswear & Apparel ERP
-          </span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/logo.png"
+            alt="Next Fit"
+            className="w-10 h-10 rounded-full border border-slate-700 bg-black object-cover shrink-0 shadow-sm"
+          />
+          <div className="flex flex-col justify-center min-w-0">
+            <span className="font-extrabold text-base tracking-tight text-white group-hover:text-blue-400 transition-colors truncate max-w-[155px]">
+              {storeSettings.storeName || 'NEXT FIT'}
+            </span>
+            <span className="text-[10px] text-slate-400 truncate max-w-[155px]">
+              {storeSettings.tagline || 'Menswear & Apparel ERP'}
+            </span>
+          </div>
         </button>
         <button
           onClick={() => setMobileDrawerOpen(false)}
@@ -378,13 +386,25 @@ export function NavigationShell({ children }: { children: React.ReactNode }) {
         {/* Top Bar Contract (Compact 54px Sticky Header for iPhone + 3-Zone Desktop Header) */}
         <header className="sticky top-0 z-30 h-[54px] lg:h-16 bg-white/90 backdrop-blur-md border-b border-slate-200 px-4 lg:px-8 flex items-center justify-between gap-4 print:hidden">
           {/* Zone 1: Menu Trigger (Mobile) + Breadcrumb Trail */}
-          <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
             <button
               onClick={() => setMobileDrawerOpen(true)}
               className="lg:hidden min-h-[44px] min-w-[44px] -ml-2 flex items-center justify-center rounded-xl text-slate-700 hover:bg-slate-100 active:scale-95 transition-all"
               aria-label="Open navigation slidebar"
             >
               <Menu className="w-5 h-5" />
+            </button>
+            <button
+              onClick={() => handleSelectModule('dashboard')}
+              className="lg:hidden flex items-center shrink-0"
+              title="Home"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/logo.png"
+                alt="Next Fit"
+                className="w-7 h-7 rounded-full border border-slate-200 bg-black object-cover"
+              />
             </button>
             <div className="flex items-center gap-2 text-sm min-w-0">
               <span className="hidden sm:inline text-slate-400 font-medium whitespace-nowrap">

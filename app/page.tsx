@@ -29,9 +29,15 @@ function ErpWorkspaceRouter() {
   if (authLoading) {
     return (
       <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6">
-        <div className="w-10 h-10 rounded-2xl border-2 border-blue-500 border-t-transparent animate-spin mb-4" />
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/logo.png"
+          alt="NEXT FIT"
+          className="w-16 h-16 rounded-full border border-slate-800 bg-black object-cover mb-4 animate-pulse"
+        />
+        <div className="w-8 h-8 rounded-full border-2 border-blue-500 border-t-transparent animate-spin mb-3" />
         <p className="text-sm font-medium text-slate-300">
-          Loading ThreadCraft Apparel ERP...
+          Loading NEXT FIT Apparel ERP...
         </p>
       </div>
     );
@@ -42,21 +48,29 @@ function ErpWorkspaceRouter() {
     return (
       <div className="min-h-screen bg-slate-950 text-white flex flex-col justify-between p-6 sm:p-12">
         <header className="max-w-5xl w-full mx-auto flex items-center justify-between">
-          <span className="text-lg font-bold tracking-tight text-white">
-            ThreadCraft ERP
-          </span>
+          <div className="flex items-center gap-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo.png"
+              alt="NEXT FIT"
+              className="w-10 h-10 rounded-full border border-slate-700 bg-black object-cover shrink-0"
+            />
+            <span className="text-lg font-bold tracking-tight text-white">
+              NEXT FIT ERP
+            </span>
+          </div>
           <span className="text-xs text-slate-400">
-            iPhone & Desktop Apparel POS
+            PWA Mobile POS & Inventory
           </span>
         </header>
 
         <main className="max-w-xl w-full mx-auto my-auto py-10 space-y-6">
           <div className="space-y-3">
-            <p className="text-xs font-semibold text-blue-400 tracking-wide">
-              Menswear & Garment Showroom Management
+            <p className="text-xs font-semibold text-blue-400 tracking-wide uppercase">
+              Menswear Showroom Management
             </p>
             <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-white leading-tight">
-              Run your clothing store from your iPhone or showroom counter.
+              Run NEXT FIT from your smartphone or showroom counter.
             </h1>
             <p className="text-sm sm:text-base text-slate-300 leading-relaxed">
               Manage variant stock across Pant, Shirt, Polo Shirt, T-Shirt, Half Pant,
@@ -92,7 +106,7 @@ function ErpWorkspaceRouter() {
           <div className="grid grid-cols-2 gap-3 text-xs text-slate-400 pt-2">
             <div className="flex items-center gap-2">
               <Smartphone className="w-4 h-4 text-blue-400 shrink-0" />
-              <span>Optimized for iPhone Touch & AirPrint</span>
+              <span>Installable PWA App on iOS & Android</span>
             </div>
             <div className="flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -102,7 +116,7 @@ function ErpWorkspaceRouter() {
         </main>
 
         <footer className="max-w-5xl w-full mx-auto text-xs text-slate-500 flex items-center justify-between">
-          <span>ThreadCraft Apparel ERP</span>
+          <span>NEXT FIT Apparel ERP</span>
           <span>BDT (৳) Accounting & Inventory</span>
         </footer>
       </div>

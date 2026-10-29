@@ -281,10 +281,10 @@ export function getSampleExpenses(today: string): Omit<Expense, 'id' | 'ownerId'
 }
 
 export const DEFAULT_STORE_SETTINGS: Omit<StoreSettings, 'id' | 'ownerId' | 'createdAt' | 'updatedAt'> = {
-  storeName: 'ThreadCraft Menswear & Co.',
-  tagline: 'Premium Denim, Shirts, Polos & Formal Attire',
+  storeName: 'NEXT FIT',
+  tagline: 'Premium Menswear, Denim, Shirts & Polos',
   phone: '+880 1711-009988',
-  email: 'sales@threadcraftbd.com',
+  email: 'contact@nextfitbd.com',
   address: 'Shop #204, Level 2, Bashundhara City Shopping Mall, Dhaka',
   currencySymbol: '৳',
   invoiceFooterNote: 'Exchange allowed within 7 days with original tag & receipt. Thank you for shopping with us!',
