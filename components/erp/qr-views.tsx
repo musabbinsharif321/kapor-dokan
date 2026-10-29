@@ -34,6 +34,7 @@ interface SingleProductQrModalProps {
 export function SingleProductQrModal({ product, onClose }: SingleProductQrModalProps) {
   const { storeSettings } = useErp();
   const [qrUrl, setQrUrl] = useState<string>('');
+  const [labelLayout, setLabelLayout] = useState<'landscape' | 'portrait'>('landscape');
   const sym = storeSettings.currencySymbol || '৳';
 
   useEffect(() => {
@@ -58,15 +59,20 @@ export function SingleProductQrModal({ product, onClose }: SingleProductQrModalP
   if (!product) return null;
 
   const handlePrint = () => {
-    const brandName = storeSettings.storeName || 'NEXT FIT';
+    const brandName =
+      storeSettings.storeName && !storeSettings.storeName.includes('ThreadCraft')
+        ? storeSettings.storeName
+        : 'NEXT FIT';
     const priceFormatted = `${sym}${Number(product.sellingPrice).toLocaleString()}`;
 
     // Open clean, isolated print window strictly sized for 58mm / thermal label
-    const printWindow = window.open('', '_blank', 'width=380,height=450');
+    const printWindow = window.open('', '_blank', 'width=380,height=420');
     if (!printWindow) {
       window.print();
       return;
     }
+
+    const isLandscape = labelLayout === 'landscape';
 
     printWindow.document.write(`<!DOCTYPE html>
 <html>
@@ -75,89 +81,204 @@ export function SingleProductQrModal({ product, onClose }: SingleProductQrModalP
     <title>${product.name} - NEXT FIT Label</title>
     <style>
       @page {
-        size: 58mm 40mm;
-        margin: 0;
+        size: 58mm auto;
+        margin: 0 !important;
       }
       * {
         box-sizing: border-box;
         margin: 0;
         padding: 0;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
       }
       html, body {
-        width: 100%;
-        margin: 0;
+        width: 58mm;
+        max-width: 58mm;
+        margin: 0 auto;
         padding: 1.5mm;
         background: #fff;
         color: #000;
         display: flex;
         justify-content: center;
         align-items: center;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+        overflow: hidden !important;
       }
+      ${
+        isLandscape
+          ? `
+      /* Horizontal 50x30mm Thermal Label */
       .label-card {
         width: 52mm;
         max-width: 52mm;
+        height: 28mm;
+        max-height: 29mm;
         border: 1.5px solid #000;
         border-radius: 4px;
-        padding: 1.8mm 2mm;
-        text-align: center;
-        page-break-inside: avoid;
-        break-inside: avoid;
+        padding: 1.5mm;
+        display: flex;
+        align-items: center;
+        gap: 2mm;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+      }
+      .qr-col {
+        width: 20mm;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .qr-img {
+        width: 20mm;
+        height: 20mm;
+        object-fit: contain;
+        display: block;
+      }
+      .info-col {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        height: 100%;
+        text-align: left;
       }
       .brand-title {
-        font-size: 11px;
+        font-size: 10px;
         font-weight: 900;
-        letter-spacing: 0.8px;
+        letter-spacing: 0.6px;
         text-transform: uppercase;
         border-bottom: 1px dashed #555;
-        padding-bottom: 1.5px;
-        margin-bottom: 2px;
+        padding-bottom: 1px;
+        margin-bottom: 1px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .item-title {
-        font-size: 10px;
+        font-size: 9px;
         font-weight: 700;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        margin-bottom: 2px;
+        line-height: 1.2;
+        margin-bottom: 1px;
+      }
+      .specs-line {
+        font-size: 8px;
+        color: #222;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-bottom: 1px;
+      }
+      .price-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        border-top: 1px solid #000;
+        padding-top: 1px;
+        margin-top: 1px;
+      }
+      .sku-text {
+        font-size: 8px;
+        font-family: monospace;
+        font-weight: 600;
+      }
+      .price-tag {
+        font-size: 11.5px;
+        font-weight: 900;
+      }
+      `
+          : `
+      /* Vertical 50x32mm Thermal Label */
+      .label-card {
+        width: 50mm;
+        max-width: 50mm;
+        height: 31mm;
+        max-height: 32mm;
+        border: 1.5px solid #000;
+        border-radius: 4px;
+        padding: 1.5mm;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+      }
+      .brand-title {
+        font-size: 9.5px;
+        font-weight: 900;
+        letter-spacing: 0.6px;
+        text-transform: uppercase;
+        border-bottom: 1px dashed #555;
+        padding-bottom: 1px;
+      }
+      .item-title {
+        font-size: 8.5px;
+        font-weight: 700;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .qr-wrapper {
         display: flex;
         justify-content: center;
         align-items: center;
-        margin: 1px 0;
       }
       .qr-img {
-        width: 25mm;
-        height: 25mm;
-        display: block;
+        width: 16mm;
+        height: 16mm;
         object-fit: contain;
+        display: block;
       }
       .specs-row {
         display: flex;
         justify-content: space-between;
-        font-size: 8.5px;
+        font-size: 8px;
         font-weight: 600;
-        margin-top: 1.5px;
-        padding: 0 1px;
       }
       .price-row {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        font-size: 9px;
+        font-size: 8px;
         font-family: monospace;
         border-top: 1px solid #000;
-        padding-top: 2px;
-        margin-top: 2px;
+        padding-top: 1px;
       }
       .price-tag {
-        font-size: 12px;
+        font-size: 11px;
         font-weight: 900;
+      }
+      `
       }
     </style>
   </head>
   <body>
+    ${
+      isLandscape
+        ? `
+    <div class="label-card">
+      <div class="qr-col">
+        <img src="${qrUrl}" class="qr-img" alt="QR" />
+      </div>
+      <div class="info-col">
+        <div class="brand-title">${brandName}</div>
+        <div class="item-title">${product.name}</div>
+        <div class="specs-line">${product.category} · Size ${product.size} · ${product.color}</div>
+        <div class="price-row">
+          <span class="sku-text">${product.sku}</span>
+          <span class="price-tag">${priceFormatted}</span>
+        </div>
+      </div>
+    </div>
+    `
+        : `
     <div class="label-card">
       <div class="brand-title">${brandName}</div>
       <div class="item-title">${product.name}</div>
@@ -174,6 +295,8 @@ export function SingleProductQrModal({ product, onClose }: SingleProductQrModalP
         <span class="price-tag">${priceFormatted}</span>
       </div>
     </div>
+    `
+    }
     <script>
       window.onload = function() {
         window.focus();
@@ -186,13 +309,19 @@ export function SingleProductQrModal({ product, onClose }: SingleProductQrModalP
     printWindow.document.close();
   };
 
+  const brandDisplayName =
+    storeSettings.storeName && !storeSettings.storeName.includes('ThreadCraft')
+      ? storeSettings.storeName
+      : 'NEXT FIT';
+
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 print:static print:bg-white print:p-0">
       <div className="bg-white w-full max-w-sm rounded-2xl border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 print:border-none print:shadow-none print:w-auto print:max-w-none">
+        {/* Header */}
         <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between print:hidden">
           <div className="flex items-center gap-2">
             <QrCode className="w-5 h-5 text-blue-600" />
-            <h3 className="font-bold text-slate-900 text-sm">Garment QR Label</h3>
+            <h3 className="font-bold text-slate-900 text-sm">58mm Garment QR Label</h3>
           </div>
           <button
             onClick={onClose}
@@ -202,54 +331,119 @@ export function SingleProductQrModal({ product, onClose }: SingleProductQrModalP
           </button>
         </div>
 
-        {/* Printable Sticker Box (Designed for standard 50x30mm thermal or tag print) */}
-        <div className="p-6 flex flex-col items-center justify-center text-center print:p-0">
-          <div
-            id="single-qr-sticker"
-            className="w-full max-w-[280px] p-4 bg-white border-2 border-slate-900 rounded-xl space-y-2 text-slate-900 shadow-sm print:border-black print:shadow-none print:w-[52mm] print:h-auto print:p-2 print:m-0 print:break-inside-avoid"
+        {/* Orientation Selector Tabs */}
+        <div className="p-3 bg-slate-50 border-b border-slate-100 flex gap-2 print:hidden">
+          <button
+            type="button"
+            onClick={() => setLabelLayout('landscape')}
+            className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-semibold border transition-all ${
+              labelLayout === 'landscape'
+                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+            }`}
           >
-            <div className="border-b border-dashed border-slate-300 pb-1.5 print:pb-1">
-              <p className="font-extrabold text-xs uppercase tracking-wider text-slate-900 print:text-[10px]">
-                {storeSettings.storeName || 'NEXT FIT'}
-              </p>
-              <p className="font-bold text-sm text-slate-900 truncate mt-0.5 print:text-xs">
-                {product.name}
-              </p>
-            </div>
+            🏷️ Horizontal (50×30mm)
+          </button>
+          <button
+            type="button"
+            onClick={() => setLabelLayout('portrait')}
+            className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-semibold border transition-all ${
+              labelLayout === 'portrait'
+                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+            }`}
+          >
+            📋 Vertical (50×32mm)
+          </button>
+        </div>
 
-            {/* QR Code Graphic */}
-            <div className="flex justify-center py-1">
-              {qrUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={qrUrl}
-                  alt={`QR for ${product.sku}`}
-                  className="w-36 h-36 object-contain print:w-24 print:h-24"
-                />
-              ) : (
-                <div className="w-36 h-36 bg-slate-100 flex items-center justify-center text-xs text-slate-400">
-                  Generating QR...
+        {/* Printable Sticker Live Preview */}
+        <div className="p-6 flex flex-col items-center justify-center text-center print:p-0">
+          {labelLayout === 'landscape' ? (
+            /* Horizontal Preview (Side-by-side 50x30mm) */
+            <div
+              id="single-qr-sticker"
+              className="w-full max-w-[280px] p-3 bg-white border-2 border-slate-900 rounded-xl space-x-2.5 text-slate-900 shadow-sm flex items-center text-left"
+            >
+              <div className="w-20 shrink-0 flex items-center justify-center">
+                {qrUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={qrUrl}
+                    alt={`QR for ${product.sku}`}
+                    className="w-20 h-20 object-contain"
+                  />
+                ) : (
+                  <div className="w-20 h-20 bg-slate-100 flex items-center justify-center text-[10px] text-slate-400">
+                    Generating...
+                  </div>
+                )}
+              </div>
+              <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5 space-y-1">
+                <div className="border-b border-dashed border-slate-300 pb-1">
+                  <p className="font-black text-[11px] uppercase tracking-wider text-slate-900 truncate">
+                    {brandDisplayName}
+                  </p>
+                  <p className="font-bold text-xs text-slate-900 truncate">
+                    {product.name}
+                  </p>
                 </div>
-              )}
+                <p className="text-[10px] text-slate-600 truncate">
+                  {product.category} · Size <strong className="font-bold">{product.size}</strong> · {product.color}
+                </p>
+                <div className="flex items-center justify-between pt-1 border-t border-slate-200 text-xs font-mono">
+                  <span className="text-[10px] text-slate-500 font-semibold">{product.sku}</span>
+                  <span className="font-extrabold text-slate-900">
+                    {formatBDT(product.sellingPrice, sym)}
+                  </span>
+                </div>
+              </div>
             </div>
+          ) : (
+            /* Vertical Preview (Compact 50x32mm) */
+            <div
+              id="single-qr-sticker"
+              className="w-full max-w-[240px] p-3.5 bg-white border-2 border-slate-900 rounded-xl space-y-1.5 text-slate-900 shadow-sm text-center"
+            >
+              <div className="border-b border-dashed border-slate-300 pb-1">
+                <p className="font-black text-xs uppercase tracking-wider text-slate-900">
+                  {brandDisplayName}
+                </p>
+                <p className="font-bold text-xs text-slate-900 truncate mt-0.5">
+                  {product.name}
+                </p>
+              </div>
 
-            {/* Details */}
-            <div className="space-y-0.5 text-xs print:text-[9px]">
-              <div className="flex items-center justify-between font-medium">
-                <span>{product.category}</span>
-                <span>Size: <strong className="font-bold">{product.size}</strong></span>
-                <span>{product.color}</span>
+              <div className="flex justify-center py-0.5">
+                {qrUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={qrUrl}
+                    alt={`QR for ${product.sku}`}
+                    className="w-24 h-24 object-contain"
+                  />
+                ) : (
+                  <div className="w-24 h-24 bg-slate-100 flex items-center justify-center text-xs text-slate-400">
+                    Generating...
+                  </div>
+                )}
               </div>
-              <div className="flex items-center justify-between pt-1 border-t border-slate-200">
-                <span className="font-mono text-[11px] font-semibold text-slate-600 print:text-[8px]">
-                  {product.sku}
-                </span>
-                <span className="font-bold font-mono text-sm text-slate-900 print:text-xs">
-                  {formatBDT(product.sellingPrice, sym)}
-                </span>
+
+              <div className="space-y-0.5 text-xs">
+                <div className="flex items-center justify-between text-[11px] font-medium text-slate-700">
+                  <span>{product.category}</span>
+                  <span>Size: <strong>{product.size}</strong></span>
+                  <span>{product.color}</span>
+                </div>
+                <div className="flex items-center justify-between pt-1 border-t border-slate-200 font-mono">
+                  <span className="text-[10px] text-slate-500 font-semibold">{product.sku}</span>
+                  <span className="font-black text-sm text-slate-900">
+                    {formatBDT(product.sellingPrice, sym)}
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Action Buttons */}
@@ -269,7 +463,7 @@ export function SingleProductQrModal({ product, onClose }: SingleProductQrModalP
             className="flex-1 min-h-[44px] px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs flex items-center justify-center gap-1.5 shadow-sm"
           >
             <Printer className="w-4 h-4" />
-            <span>Print Label</span>
+            <span>Print 1-Page Label</span>
           </button>
         </div>
       </div>
