@@ -6,6 +6,9 @@ import {
   onAuthStateChanged,
   signInWithPopup,
   signOut,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
 } from 'firebase/auth';
 import {
   collection,
@@ -122,6 +125,9 @@ interface ErpContextValue {
   pendingOrderForInvoice: SalesOrder | null;
   setPendingOrderForInvoice: (order: SalesOrder | null) => void;
   signInWithGoogle: () => Promise<void>;
+  signInWithEmail: (email: string, password: string) => Promise<void>;
+  signUpWithEmail: (email: string, password: string) => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
   logout: () => Promise<void>;
   seedSampleData: () => Promise<void>;
   addCustomCategory: (name: string, bengaliLabel?: string) => Promise<void>;
@@ -485,6 +491,59 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Sign-in cancelled';
       showToast(msg, 'error');
+    }
+  };
+
+  const signInWithEmail = async (email: string, password: string) => {
+    try {
+      await signInWithEmailAndPassword(auth, email.trim(), password);
+      showToast('Signed in successfully');
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code || '';
+      let msg = 'Failed to sign in. Please check your credentials.';
+      if (
+        code === 'auth/invalid-credential' ||
+        code === 'auth/wrong-password' ||
+        code === 'auth/user-not-found'
+      ) {
+        msg = 'Invalid email or password.';
+      } else if (code === 'auth/invalid-email') {
+        msg = 'Please enter a valid email address.';
+      } else if (code === 'auth/too-many-requests') {
+        msg = 'Too many attempts. Please try again later.';
+      }
+      showToast(msg, 'error');
+      throw new Error(msg);
+    }
+  };
+
+  const signUpWithEmail = async (email: string, password: string) => {
+    try {
+      await createUserWithEmailAndPassword(auth, email.trim(), password);
+      showToast('Account created successfully');
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code || '';
+      let msg = 'Failed to create account.';
+      if (code === 'auth/email-already-in-use') {
+        msg = 'An account with this email already exists.';
+      } else if (code === 'auth/weak-password') {
+        msg = 'Password should be at least 6 characters.';
+      } else if (code === 'auth/invalid-email') {
+        msg = 'Please enter a valid email address.';
+      }
+      showToast(msg, 'error');
+      throw new Error(msg);
+    }
+  };
+
+  const resetPassword = async (email: string) => {
+    try {
+      await sendPasswordResetEmail(auth, email.trim());
+      showToast('Password reset link sent to your email', 'info');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to send reset link';
+      showToast(msg, 'error');
+      throw new Error(msg);
     }
   };
 
@@ -1548,6 +1607,9 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
         pendingOrderForInvoice,
         setPendingOrderForInvoice,
         signInWithGoogle,
+        signInWithEmail,
+        signUpWithEmail,
+        resetPassword,
         logout,
         seedSampleData,
         addCustomCategory,
