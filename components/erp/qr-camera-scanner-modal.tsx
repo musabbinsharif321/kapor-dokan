@@ -5,19 +5,18 @@ import {
   X,
   Camera,
   RefreshCw,
-  Flashlight,
   AlertCircle,
   CheckCircle2,
   Package,
   FileText,
-  ClipboardList,
   Sparkles,
   ArrowRight,
   Plus,
   Minus,
   Upload,
   Keyboard,
-  Maximize2,
+  ShoppingBag,
+  Trash2,
 } from 'lucide-react';
 import { useErp } from '@/context/erp-context';
 import {
@@ -25,9 +24,13 @@ import {
   playScanSound,
   triggerScanHaptic,
   ScannedCodeResult,
-  encodeProductQr,
 } from '@/lib/qr-utils';
 import { Product, SalesInvoice, SalesOrder, formatBDT } from '@/lib/types';
+
+export interface ScannedSessionItem {
+  product: Product;
+  quantity: number;
+}
 
 interface QrCameraScannerModalProps {
   isOpen: boolean;
@@ -36,7 +39,7 @@ interface QrCameraScannerModalProps {
   onScanItem?: (product: Product) => void;
   title?: string;
   subtitle?: string;
-  continuousMode?: boolean; // If true, doesn't close on single scan
+  continuousMode?: boolean; // If true, allows scanning multiple garments continuously
 }
 
 export function QrCameraScannerModal({
@@ -45,7 +48,7 @@ export function QrCameraScannerModal({
   onScanItem,
   title = 'Mobile QR & Barcode Scanner',
   subtitle = 'Point camera at any garment QR sticker or paper receipt',
-  continuousMode = false,
+  continuousMode = true,
 }: QrCameraScannerModalProps) {
   const {
     products,
@@ -57,6 +60,7 @@ export function QrCameraScannerModal({
     showToast,
     setPendingOrderForInvoice,
     openReturnForInvoice,
+    addPendingCartProduct,
   } = useErp();
 
   const sym = storeSettings.currencySymbol || '৳';
@@ -65,57 +69,95 @@ export function QrCameraScannerModal({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameras, setCameras] = useState<Array<{ id: string; label: string }>>([]);
   const [selectedCameraId, setSelectedCameraId] = useState<string>('');
-  const [torchOn, setTorchOn] = useState(false);
-  const [torchSupported, setTorchSupported] = useState(false);
   const [scannedResult, setScannedResult] = useState<ScannedCodeResult | null>(null);
   const [matchedProduct, setMatchedProduct] = useState<Product | null>(null);
   const [matchedInvoice, setMatchedInvoice] = useState<SalesInvoice | null>(null);
   const [matchedOrder, setMatchedOrder] = useState<SalesOrder | null>(null);
-  const [lastScannedText, setLastScannedText] = useState<string>('');
-  const [isProcessing, setIsProcessing] = useState(false);
   const [manualInput, setManualInput] = useState('');
   const [showManualInput, setShowManualInput] = useState(false);
-  const [continuousCount, setContinuousCount] = useState(0);
+
+  // Continuous scanning session state
+  const [sessionItems, setSessionItems] = useState<ScannedSessionItem[]>([]);
+  const [scanSuccessFlash, setScanSuccessFlash] = useState(false);
+  const [lastScannedFeedback, setLastScannedFeedback] = useState<string | null>(null);
 
   const scannerRef = useRef<unknown>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const readerElementId = 'threadcraft-qr-reader';
 
+  // Dedicated throttle ref: stores timestamp and last scanned string
+  const lastScanRef = useRef<{ text: string; time: number }>({ text: '', time: 0 });
+
+  // Fresh state refs to avoid breaking the camera effect on re-render
+  const productsRef = useRef(products);
+  useEffect(() => {
+    productsRef.current = products;
+  }, [products]);
+
+  const salesInvoicesRef = useRef(salesInvoices);
+  useEffect(() => {
+    salesInvoicesRef.current = salesInvoices;
+  }, [salesInvoices]);
+
+  const salesOrdersRef = useRef(salesOrders);
+  useEffect(() => {
+    salesOrdersRef.current = salesOrders;
+  }, [salesOrders]);
+
+  const onScanItemRef = useRef(onScanItem);
+  useEffect(() => {
+    onScanItemRef.current = onScanItem;
+  }, [onScanItem]);
+
+  const sessionItemsRef = useRef(sessionItems);
+  useEffect(() => {
+    sessionItemsRef.current = sessionItems;
+  }, [sessionItems]);
+
   // Handle scanned string
   const handleDecodedString = useCallback(
     (decodedText: string) => {
-      if (!decodedText || isProcessing) return;
+      if (!decodedText) return;
 
-      // Throttle immediate duplicate scan within 1.5 seconds if continuous
-      if (decodedText === lastScannedText && Date.now() - (handleDecodedString as unknown as { lastTime?: number }).lastTime! < 1500) {
+      const now = Date.now();
+      const last = lastScanRef.current;
+
+      // Intelligent throttle:
+      // If the exact same code is scanned again, wait 800ms before allowing a second unit.
+      // If a different item/code is scanned, wait only 300ms.
+      const isSameCode = decodedText === last.text;
+      const minInterval = isSameCode ? 800 : 300;
+      if (now - last.time < minInterval) {
         return;
       }
-      (handleDecodedString as unknown as { lastTime?: number }).lastTime = Date.now();
+      lastScanRef.current = { text: decodedText, time: now };
 
+      // Audio & Haptic Feedback
       playScanSound();
       triggerScanHaptic();
 
-      setIsProcessing(true);
-      setLastScannedText(decodedText);
+      // Trigger green visual flash on reticle
+      setScanSuccessFlash(true);
+      setTimeout(() => setScanSuccessFlash(false), 450);
 
       const parsed = parseScannedCode(decodedText);
       setScannedResult(parsed);
 
-      // Search in Database
-      const foundProduct = products.find(
+      // Search in Database using fresh refs
+      const foundProduct = productsRef.current.find(
         (p) =>
           p.sku.toLowerCase() === parsed.identifier.toLowerCase() ||
           p.id.toLowerCase() === parsed.identifier.toLowerCase() ||
           decodedText.toLowerCase().includes(p.sku.toLowerCase())
       );
 
-      const foundInvoice = salesInvoices.find(
+      const foundInvoice = salesInvoicesRef.current.find(
         (inv) =>
           inv.invoiceNumber.toLowerCase() === parsed.identifier.toLowerCase() ||
           inv.id.toLowerCase() === parsed.identifier.toLowerCase()
       );
 
-      const foundOrder = salesOrders.find(
+      const foundOrder = salesOrdersRef.current.find(
         (ord) =>
           ord.orderNumber.toLowerCase() === parsed.identifier.toLowerCase() ||
           ord.id.toLowerCase() === parsed.identifier.toLowerCase()
@@ -125,46 +167,108 @@ export function QrCameraScannerModal({
       setMatchedInvoice(foundInvoice || null);
       setMatchedOrder(foundOrder || null);
 
-      if (onScanItem && foundProduct) {
-        onScanItem(foundProduct);
-        setContinuousCount((c) => c + 1);
-        showToast(`Scanned: ${foundProduct.name} (${foundProduct.size})`, 'success');
+      if (foundProduct) {
+        if (foundProduct.stock <= 0) {
+          setLastScannedFeedback(`Out of stock: ${foundProduct.name} (0 pcs)`);
+          showToast(`Out of stock: ${foundProduct.name} has 0 pcs in stock`, 'error');
+          return;
+        }
 
+        const existingSession = sessionItemsRef.current.find((i) => i.product.id === foundProduct.id);
+        if (existingSession && existingSession.quantity >= foundProduct.stock) {
+          setLastScannedFeedback(`Max stock reached (${foundProduct.stock} pcs max)`);
+          showToast(
+            `Cannot add more: Only ${foundProduct.stock} pcs in stock for ${foundProduct.name}`,
+            'error'
+          );
+          return;
+        }
+
+        setLastScannedFeedback(`+1 ${foundProduct.name} (${foundProduct.size})`);
+
+        // Update local session items list
+        setSessionItems((prev) => {
+          const idx = prev.findIndex((i) => i.product.id === foundProduct.id);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = { ...next[idx], quantity: Math.min(foundProduct.stock, next[idx].quantity + 1) };
+            return next;
+          }
+          return [{ product: foundProduct, quantity: 1 }, ...prev];
+        });
+
+        // Pass to parent or global POS cart
+        if (onScanItemRef.current) {
+          onScanItemRef.current(foundProduct);
+        } else {
+          addPendingCartProduct(foundProduct);
+        }
+
+        showToast(`Added: ${foundProduct.name} (${foundProduct.size})`, 'success');
+
+        // In single-scan mode, close modal after short delay
         if (!continuousMode) {
           setTimeout(() => {
-            setIsProcessing(false);
             onClose();
-          }, 400);
+          }, 450);
           return;
+        }
+      } else if (!foundInvoice && !foundOrder) {
+        setLastScannedFeedback(`Unrecognized code: ${parsed.identifier}`);
+      }
+    },
+    [addPendingCartProduct, continuousMode, onClose, showToast]
+  );
+
+  // Keep a stable ref to handleDecodedString so camera listener never breaks
+  const handleDecodedStringRef = useRef(handleDecodedString);
+  useEffect(() => {
+    handleDecodedStringRef.current = handleDecodedString;
+  }, [handleDecodedString]);
+
+  // Adjust session item quantity directly from inside the scanner modal
+  const handleUpdateSessionQty = (productId: string, delta: number) => {
+    setSessionItems((prev) => {
+      const idx = prev.findIndex((i) => i.product.id === productId);
+      if (idx < 0) return prev;
+      const target = prev[idx];
+      if (delta > 0 && target.quantity >= target.product.stock) {
+        showToast(
+          `Cannot add more: Only ${target.product.stock} pcs in stock for ${target.product.name}`,
+          'error'
+        );
+        return prev;
+      }
+      const newQty = Math.min(target.product.stock, target.quantity + delta);
+
+      if (delta > 0) {
+        if (onScanItemRef.current) {
+          onScanItemRef.current(target.product);
+        } else {
+          addPendingCartProduct(target.product);
         }
       }
 
-      setTimeout(() => {
-        setIsProcessing(false);
-      }, 800);
-    },
-    [
-      isProcessing,
-      lastScannedText,
-      products,
-      salesInvoices,
-      salesOrders,
-      onScanItem,
-      continuousMode,
-      showToast,
-      onClose,
-    ]
-  );
+      if (newQty <= 0) {
+        return prev.filter((i) => i.product.id !== productId);
+      }
+      const next = [...prev];
+      next[idx] = { ...target, quantity: newQty };
+      return next;
+    });
+  };
 
-  // Initialize camera scanner when modal opens
+  // Initialize camera scanner when modal opens (ONLY depends on isOpen and selectedCameraId)
   useEffect(() => {
     if (!isOpen) {
       setScannedResult(null);
       setMatchedProduct(null);
       setMatchedInvoice(null);
       setMatchedOrder(null);
-      setLastScannedText('');
-      setContinuousCount(0);
+      setSessionItems([]);
+      setScanSuccessFlash(false);
+      setLastScannedFeedback(null);
+      lastScanRef.current = { text: '', time: 0 };
       return;
     }
 
@@ -208,7 +312,7 @@ export function QrCameraScannerModal({
           setSelectedCameraId(backCam.id);
 
           await html5QrCodeInstance.start(
-            backCam.id,
+            selectedCameraId || backCam.id,
             {
               fps: 15,
               qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
@@ -219,7 +323,7 @@ export function QrCameraScannerModal({
               aspectRatio: 1.0,
             },
             (decodedText: string) => {
-              handleDecodedString(decodedText);
+              handleDecodedStringRef.current(decodedText);
             },
             () => {
               // frame scanned without QR, ignore
@@ -235,7 +339,7 @@ export function QrCameraScannerModal({
               aspectRatio: 1.0,
             },
             (decodedText: string) => {
-              handleDecodedString(decodedText);
+              handleDecodedStringRef.current(decodedText);
             },
             () => {}
           );
@@ -264,9 +368,12 @@ export function QrCameraScannerModal({
         try {
           const scanner = scannerRef.current as any;
           if (scanner.isScanning) {
-            scanner.stop().then(() => {
-              scanner.clear();
-            }).catch((e: any) => console.debug('QR stop error:', e));
+            scanner
+              .stop()
+              .then(() => {
+                scanner.clear();
+              })
+              .catch((e: any) => console.debug('QR stop error:', e));
           } else {
             scanner.clear();
           }
@@ -276,7 +383,7 @@ export function QrCameraScannerModal({
         scannerRef.current = null;
       }
     };
-  }, [isOpen, handleDecodedString]);
+  }, [isOpen, selectedCameraId]);
 
   // Switch camera
   const handleSwitchCamera = async () => {
@@ -290,22 +397,6 @@ export function QrCameraScannerModal({
       const nextIndex = (currentIndex + 1) % cameras.length;
       const nextCamera = cameras[nextIndex];
       setSelectedCameraId(nextCamera.id);
-
-      await scanner.start(
-        nextCamera.id,
-        {
-          fps: 15,
-          qrbox: (w: number, h: number) => {
-            const edge = Math.floor(Math.min(w, h) * 0.75);
-            return { width: edge, height: edge };
-          },
-          aspectRatio: 1.0,
-        },
-        (decodedText: string) => {
-          handleDecodedString(decodedText);
-        },
-        () => {}
-      );
     } catch (err: any) {
       console.error('Failed to switch camera:', err);
     }
@@ -320,9 +411,9 @@ export function QrCameraScannerModal({
       const { Html5Qrcode } = await import('html5-qrcode');
       const tempScanner = new Html5Qrcode('threadcraft-qr-file-temp');
       const decodedResult = await tempScanner.scanFile(file, true);
-      handleDecodedString(decodedResult);
+      handleDecodedStringRef.current(decodedResult);
       tempScanner.clear();
-    } catch (err: any) {
+    } catch {
       showToast('No readable QR code found in the selected image', 'error');
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -333,7 +424,7 @@ export function QrCameraScannerModal({
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualInput.trim()) return;
-    handleDecodedString(manualInput.trim());
+    handleDecodedStringRef.current(manualInput.trim());
     setManualInput('');
     setShowManualInput(false);
   };
@@ -346,6 +437,12 @@ export function QrCameraScannerModal({
     setMatchedProduct({ ...matchedProduct, stock: newStock });
     showToast(`Stock updated to ${newStock} pcs`, 'success');
   };
+
+  const totalSessionQty = sessionItems.reduce((acc, i) => acc + i.quantity, 0);
+  const totalSessionAmount = sessionItems.reduce(
+    (acc, i) => acc + i.quantity * i.product.sellingPrice,
+    0
+  );
 
   if (!isOpen) return null;
 
@@ -384,15 +481,24 @@ export function QrCameraScannerModal({
 
         {/* Main Content Area */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {/* Continuous Count Pill */}
-          {continuousCount > 0 && (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-1.5 flex items-center justify-between text-xs text-emerald-800">
-              <span className="font-semibold flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                Items Scanned to Cart:
-              </span>
-              <span className="font-mono font-bold bg-emerald-600 text-white px-2 py-0.5 rounded-lg">
-                {continuousCount} pcs
+          {/* Continuous Live Cart Badge */}
+          {totalSessionQty > 0 && (
+            <div className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-2xl p-3 shadow-md flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center">
+                  <ShoppingBag className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold leading-tight">
+                    {totalSessionQty} {totalSessionQty === 1 ? 'Garment' : 'Garments'} Added to POS Cart
+                  </p>
+                  <p className="text-[11px] text-emerald-100 font-mono">
+                    Session Subtotal: {formatBDT(totalSessionAmount, sym)}
+                  </p>
+                </div>
+              </div>
+              <span className="text-[11px] font-bold bg-white text-emerald-800 px-2.5 py-1 rounded-xl shadow-xs">
+                Active
               </span>
             </div>
           )}
@@ -405,16 +511,58 @@ export function QrCameraScannerModal({
             {/* Viewfinder Target Reticle Overlay */}
             {cameraActive && !cameraError && (
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                <div className="w-52 h-52 border-2 border-blue-400/80 rounded-2xl relative shadow-lg">
+                <div
+                  className={`w-56 h-56 rounded-2xl relative transition-all duration-300 ${
+                    scanSuccessFlash
+                      ? 'border-4 border-emerald-400 bg-emerald-500/20 shadow-[0_0_30px_rgba(52,211,153,0.6)]'
+                      : 'border-2 border-blue-400/80 shadow-lg'
+                  }`}
+                >
                   {/* Corner Target Accents */}
-                  <div className="absolute -top-1 -left-1 w-5 h-5 border-t-4 border-l-4 border-blue-500 rounded-tl-md" />
-                  <div className="absolute -top-1 -right-1 w-5 h-5 border-t-4 border-r-4 border-blue-500 rounded-tr-md" />
-                  <div className="absolute -bottom-1 -left-1 w-5 h-5 border-b-4 border-l-4 border-blue-500 rounded-bl-md" />
-                  <div className="absolute -bottom-1 -right-1 w-5 h-5 border-b-4 border-r-4 border-blue-500 rounded-br-md" />
+                  <div
+                    className={`absolute -top-1 -left-1 w-6 h-6 border-t-4 border-l-4 rounded-tl-md transition-colors ${
+                      scanSuccessFlash ? 'border-emerald-400' : 'border-blue-500'
+                    }`}
+                  />
+                  <div
+                    className={`absolute -top-1 -right-1 w-6 h-6 border-t-4 border-r-4 rounded-tr-md transition-colors ${
+                      scanSuccessFlash ? 'border-emerald-400' : 'border-blue-500'
+                    }`}
+                  />
+                  <div
+                    className={`absolute -bottom-1 -left-1 w-6 h-6 border-b-4 border-l-4 rounded-bl-md transition-colors ${
+                      scanSuccessFlash ? 'border-emerald-400' : 'border-blue-500'
+                    }`}
+                  />
+                  <div
+                    className={`absolute -bottom-1 -right-1 w-6 h-6 border-b-4 border-r-4 rounded-br-md transition-colors ${
+                      scanSuccessFlash ? 'border-emerald-400' : 'border-blue-500'
+                    }`}
+                  />
 
-                  {/* Animated Laser Scanning Beam */}
-                  <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-blue-400 to-transparent absolute top-0 animate-[bounce_2s_infinite]" />
+                  {scanSuccessFlash ? (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center animate-in zoom-in-75 duration-150">
+                      <div className="w-14 h-14 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-lg">
+                        <CheckCircle2 className="w-8 h-8" />
+                      </div>
+                      <span className="mt-2 text-xs font-bold text-emerald-300 drop-shadow-md">
+                        Item Added!
+                      </span>
+                    </div>
+                  ) : (
+                    /* Animated Laser Scanning Beam */
+                    <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-blue-400 to-transparent absolute top-0 animate-[bounce_2s_infinite]" />
+                  )}
                 </div>
+              </div>
+            )}
+
+            {/* Last Scanned Quick Flash Toast on Viewfinder */}
+            {lastScannedFeedback && (
+              <div className="absolute bottom-3 left-3 right-3 pointer-events-none flex justify-center">
+                <span className="bg-slate-900/90 backdrop-blur-md text-white text-[11px] font-semibold px-3 py-1.5 rounded-full border border-slate-700 shadow-md">
+                  {lastScannedFeedback}
+                </span>
               </div>
             )}
 
@@ -496,7 +644,7 @@ export function QrCameraScannerModal({
                   type="text"
                   value={manualInput}
                   onChange={(e) => setManualInput(e.target.value)}
-                  placeholder="e.g. PNT-32-101 or INV-2026-001"
+                  placeholder="e.g. HSH-L-SKY or TC-ITEM:..."
                   className="flex-1 min-h-[44px] px-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-600 uppercase"
                 />
                 <button
@@ -509,14 +657,94 @@ export function QrCameraScannerModal({
             </form>
           )}
 
-          {/* Scanned Result Card */}
-          {scannedResult && (
+          {/* Live Scanned Items Session Basket */}
+          {sessionItems.length > 0 && (
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                <div className="flex items-center gap-2">
+                  <ShoppingBag className="w-4 h-4 text-blue-600" />
+                  <span className="text-xs font-bold text-slate-900">
+                    Items Scanned This Session ({totalSessionQty} pcs)
+                  </span>
+                </div>
+                <span className="text-xs font-mono font-bold text-slate-900">
+                  {formatBDT(totalSessionAmount, sym)}
+                </span>
+              </div>
+
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                {sessionItems.map((item) => (
+                  <div
+                    key={item.product.id}
+                    className="bg-white rounded-xl border border-slate-200 p-2.5 flex items-center justify-between gap-2 shadow-xs"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-slate-900 truncate">
+                        {item.product.name}
+                      </p>
+                      <p className="text-[11px] text-slate-500 flex items-center gap-1.5 mt-0.5 flex-wrap">
+                        <span className="text-blue-700 font-medium">{item.product.category}</span>
+                        <span>·</span>
+                        <span>Size: {item.product.size}</span>
+                        <span>·</span>
+                        <span className="font-mono">{formatBDT(item.product.sellingPrice, sym)}</span>
+                        <span>·</span>
+                        <span
+                          className={`text-[10px] px-1.5 py-0.2 rounded ${
+                            item.quantity >= item.product.stock
+                              ? 'bg-amber-100 text-amber-800 font-bold'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          {item.quantity >= item.product.stock
+                            ? `Max ${item.product.stock} in stock`
+                            : `Stock: ${item.product.stock}`}
+                        </span>
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateSessionQty(item.product.id, -1)}
+                        className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center"
+                        title="Remove 1"
+                      >
+                        <Minus className="w-3 h-3" />
+                      </button>
+                      <span className="font-mono font-bold text-xs px-2 text-slate-900 min-w-[20px] text-center">
+                        {item.quantity}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={item.quantity >= item.product.stock}
+                        onClick={() => handleUpdateSessionQty(item.product.id, 1)}
+                        className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                          item.quantity >= item.product.stock
+                            ? 'bg-slate-100 text-slate-300 cursor-not-allowed opacity-40'
+                            : 'bg-blue-50 hover:bg-blue-100 text-blue-700'
+                        }`}
+                        title={
+                          item.quantity >= item.product.stock
+                            ? `Only ${item.product.stock} pcs in stock`
+                            : 'Add 1'
+                        }
+                      >
+                        <Plus className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Matched Non-Product Results (Invoice / Order / Unknown) */}
+          {scannedResult && !matchedProduct && (
             <div className="border border-blue-200 bg-blue-50/50 rounded-2xl p-4 space-y-3 animate-in fade-in zoom-in-95 duration-150">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-blue-600 text-white">
-                  {matchedProduct
-                    ? 'Garment Item Matched'
-                    : matchedInvoice
+                  {matchedInvoice
                     ? 'Sales Invoice Matched'
                     : matchedOrder
                     ? 'Sales Order Matched'
@@ -527,119 +755,7 @@ export function QrCameraScannerModal({
                 </span>
               </div>
 
-              {/* 1. Matched Product Details */}
-              {matchedProduct && (
-                <div className="bg-white rounded-xl border border-blue-100 p-3.5 space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h4 className="font-bold text-slate-900 text-sm">
-                        {matchedProduct.name}
-                      </h4>
-                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 mt-0.5">
-                        <span className="font-semibold text-blue-700">
-                          {matchedProduct.category}
-                        </span>
-                        <span>·</span>
-                        <span>Size: {matchedProduct.size}</span>
-                        <span>·</span>
-                        <span>Color: {matchedProduct.color}</span>
-                        <span>·</span>
-                        <span className="font-mono text-slate-700">SKU: {matchedProduct.sku}</span>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-mono font-bold text-slate-900 text-sm">
-                        {formatBDT(matchedProduct.sellingPrice, sym)}
-                      </p>
-                      <p className="text-[11px] text-slate-400">
-                        Cost: {formatBDT(matchedProduct.purchasePrice, sym)}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Stock Indicator & Quick Adjust */}
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-1.5 font-mono">
-                      <span className="text-slate-500">In Stock:</span>
-                      <span
-                        className={`font-bold px-2 py-0.5 rounded-lg ${
-                          matchedProduct.stock <= matchedProduct.minStockAlert
-                            ? 'bg-amber-100 text-amber-800'
-                            : 'bg-emerald-100 text-emerald-800'
-                        }`}
-                      >
-                        {matchedProduct.stock} pcs
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => handleQuickStockChange(-1)}
-                        className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center"
-                        title="Reduce 1 Stock"
-                      >
-                        <Minus className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => handleQuickStockChange(1)}
-                        className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center"
-                        title="Add 1 Stock"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => handleQuickStockChange(5)}
-                        className="px-2 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-mono text-xs flex items-center justify-center"
-                        title="Add 5 Stock"
-                      >
-                        +5
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Action Buttons */}
-                  <div className="pt-1 flex flex-col sm:flex-row gap-2">
-                    {onScanItem ? (
-                      <button
-                        onClick={() => {
-                          onScanItem(matchedProduct);
-                          setContinuousCount((c) => c + 1);
-                          showToast(`Added another ${matchedProduct.name}`, 'success');
-                        }}
-                        className="flex-1 min-h-[44px] bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl flex items-center justify-center gap-2 shadow-sm"
-                      >
-                        <Plus className="w-4 h-4" />
-                        <span>Add +1 to Cart</span>
-                      </button>
-                    ) : (
-                      <>
-                        <button
-                          onClick={() => {
-                            setActiveModule('sales-invoice');
-                            onClose();
-                          }}
-                          className="flex-1 min-h-[44px] bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl flex items-center justify-center gap-2 shadow-sm"
-                        >
-                          <Plus className="w-4 h-4" />
-                          <span>Open POS Bill with Item</span>
-                        </button>
-                        <button
-                          onClick={() => {
-                            setActiveModule('inventory');
-                            onClose();
-                          }}
-                          className="min-h-[44px] px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-xs rounded-xl flex items-center justify-center gap-1.5"
-                        >
-                          <Package className="w-4 h-4 text-slate-600" />
-                          <span>View in Inventory</span>
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* 2. Matched Sales Invoice */}
+              {/* Matched Sales Invoice */}
               {matchedInvoice && (
                 <div className="bg-white rounded-xl border border-blue-100 p-3.5 space-y-3">
                   <div className="flex items-start justify-between">
@@ -698,7 +814,7 @@ export function QrCameraScannerModal({
                 </div>
               )}
 
-              {/* 3. Matched Sales Order */}
+              {/* Matched Sales Order */}
               {matchedOrder && (
                 <div className="bg-white rounded-xl border border-blue-100 p-3.5 space-y-3">
                   <div className="flex items-start justify-between">
@@ -736,8 +852,8 @@ export function QrCameraScannerModal({
                 </div>
               )}
 
-              {/* 4. Not Found Fallback */}
-              {!matchedProduct && !matchedInvoice && !matchedOrder && (
+              {/* Not Found Fallback */}
+              {!matchedInvoice && !matchedOrder && (
                 <div className="bg-white rounded-xl border border-amber-200 p-3.5 text-center space-y-2">
                   <p className="text-xs text-slate-700">
                     No matching item found for code:{' '}
@@ -746,7 +862,7 @@ export function QrCameraScannerModal({
                     </span>
                   </p>
                   <p className="text-[11px] text-slate-400">
-                    You can quickly create a new product with this SKU or check the code again.
+                    You can quickly create a new product with this SKU in inventory.
                   </p>
                   <button
                     onClick={() => {
@@ -764,21 +880,40 @@ export function QrCameraScannerModal({
           )}
         </div>
 
-        {/* Footer */}
-        <div className="p-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500 shrink-0">
-          <span className="flex items-center gap-1.5">
-            <Sparkles className="w-4 h-4 text-blue-500" />
-            <span>Fast Camera Scanner</span>
-          </span>
-          <button
-            onClick={onClose}
-            className="min-h-[40px] px-4 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-100"
-          >
-            Done
-          </button>
+        {/* Action Footer: Prominent Done Scanning & Checkout Bar */}
+        <div className="p-3 bg-slate-50 border-t border-slate-200 shrink-0 space-y-2">
+          {sessionItems.length > 0 ? (
+            <button
+              onClick={() => {
+                if (!onScanItem) {
+                  setActiveModule('sales-invoice');
+                }
+                onClose();
+              }}
+              className="w-full min-h-[48px] bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold text-sm rounded-xl flex items-center justify-center gap-2 shadow-md transition-all"
+            >
+              <ShoppingBag className="w-4 h-4" />
+              <span>
+                Done Scanning & Go to Checkout ({totalSessionQty} items · {formatBDT(totalSessionAmount, sym)})
+              </span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          ) : (
+            <div className="flex items-center justify-between text-xs text-slate-500">
+              <span className="flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-blue-500" />
+                <span>Continuous Tag Scanner</span>
+              </span>
+              <button
+                onClick={onClose}
+                className="min-h-[40px] px-4 rounded-xl bg-white border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-100"
+              >
+                Close
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 }
-

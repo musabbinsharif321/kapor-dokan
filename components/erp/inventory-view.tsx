@@ -17,6 +17,8 @@ import {
   ShieldAlert,
   Camera,
   QrCode,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { useErp } from '@/context/erp-context';
 import {
@@ -37,6 +39,8 @@ export function InventoryHistoryView() {
   const { inventoryLogs, setActiveModule } = useErp();
   const [actionFilter, setActionFilter] = useState<'ALL' | 'EDIT' | 'DELETE'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+  const [historyPage, setHistoryPage] = useState(1);
+  const historyPageSize = 10;
 
   const filteredLogs = inventoryLogs.filter((log) => {
     const matchesAction = actionFilter === 'ALL' || log.action === actionFilter;
@@ -49,6 +53,12 @@ export function InventoryHistoryView() {
       log.details.toLowerCase().includes(q);
     return matchesAction && matchesSearch;
   });
+
+  const totalHistoryPages = Math.max(1, Math.ceil(filteredLogs.length / historyPageSize));
+  const pagedLogs = filteredLogs.slice(
+    (historyPage - 1) * historyPageSize,
+    historyPage * historyPageSize
+  );
 
   return (
     <div className="space-y-5">
@@ -111,7 +121,7 @@ export function InventoryHistoryView() {
         </div>
       ) : (
         <div className="space-y-3">
-          {filteredLogs.map((log) => {
+          {pagedLogs.map((log) => {
             const isDelete = log.action === 'DELETE';
             return (
               <div
@@ -154,6 +164,38 @@ export function InventoryHistoryView() {
               </div>
             );
           })}
+
+          {/* Mobile-Friendly Pagination Controls */}
+          {totalHistoryPages > 1 && (
+            <div className="pt-3 border-t border-slate-200 flex items-center justify-between gap-2 text-xs">
+              <span className="text-slate-500 font-mono">
+                Page {historyPage} of {totalHistoryPages} ({filteredLogs.length} logs)
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={historyPage <= 1}
+                  onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                  className="min-h-[38px] min-w-[38px] px-3 rounded-xl border border-slate-200 bg-white font-semibold text-slate-700 disabled:opacity-40 flex items-center justify-center gap-1"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  <span className="hidden sm:inline">Prev</span>
+                </button>
+                <div className="px-2 font-mono font-bold text-slate-800">
+                  {historyPage} / {totalHistoryPages}
+                </div>
+                <button
+                  type="button"
+                  disabled={historyPage >= totalHistoryPages}
+                  onClick={() => setHistoryPage((p) => Math.min(totalHistoryPages, p + 1))}
+                  className="min-h-[38px] min-w-[38px] px-3 rounded-xl border border-slate-200 bg-white font-semibold text-slate-700 disabled:opacity-40 flex items-center justify-center gap-1"
+                >
+                  <span className="hidden sm:inline">Next</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -176,6 +218,8 @@ export function InventoryView() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [lowStockOnly, setLowStockOnly] = useState(false);
+  const [productPage, setProductPage] = useState(1);
+  const productPageSize = 10;
   const [qrProduct, setQrProduct] = useState<Product | null>(null);
   const [scannerOpen, setScannerOpen] = useState(false);
 
@@ -351,6 +395,12 @@ export function InventoryView() {
     return matchesCat && matchesLow && matchesSearch;
   });
 
+  const totalProductPages = Math.max(1, Math.ceil(filteredProducts.length / productPageSize));
+  const pagedProducts = filteredProducts.slice(
+    (productPage - 1) * productPageSize,
+    productPage * productPageSize
+  );
+
   const totalFilteredUnits = filteredProducts.reduce((acc, p) => acc + p.stock, 0);
   const totalFilteredRetailValue = filteredProducts.reduce(
     (acc, p) => acc + p.stock * p.sellingPrice,
@@ -423,7 +473,10 @@ export function InventoryView() {
           <div className="sm:col-span-5 flex items-center gap-2">
             <select
               value={selectedCategoryFilter}
-              onChange={(e) => setSelectedCategoryFilter(e.target.value)}
+              onChange={(e) => {
+                setSelectedCategoryFilter(e.target.value);
+                setProductPage(1);
+              }}
               aria-label="Select Garment Category"
               className="flex-1 min-h-[44px] px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-base sm:text-sm font-semibold text-slate-900 focus:outline-none focus:border-blue-600 truncate"
             >
@@ -456,7 +509,10 @@ export function InventoryView() {
               <input
                 type="text"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setProductPage(1);
+                }}
                 placeholder="Search name, SKU, size, or color..."
                 className="w-full min-h-[44px] pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-base sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-600"
               />
@@ -476,7 +532,10 @@ export function InventoryView() {
           <div className="sm:col-span-2">
             <button
               type="button"
-              onClick={() => setLowStockOnly((prev) => !prev)}
+              onClick={() => {
+                setLowStockOnly((prev) => !prev);
+                setProductPage(1);
+              }}
               className={`w-full min-h-[44px] px-3 py-2 rounded-xl text-xs font-semibold border flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap ${
                 lowStockOnly
                   ? 'bg-amber-600 text-white border-amber-600'
@@ -520,7 +579,7 @@ export function InventoryView() {
         <>
           {/* iPhone / Mobile Touch Cards (<768px) — Stock Display + Three-Dot Menu Only */}
           <div className="grid grid-cols-1 gap-3 md:hidden">
-            {filteredProducts.map((p) => {
+            {pagedProducts.map((p) => {
               const isLow = p.stock <= p.minStockAlert;
               const menuOpen = openMenuProductId === p.id;
               return (
@@ -635,7 +694,7 @@ export function InventoryView() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs">
-                  {filteredProducts.map((p) => {
+                  {pagedProducts.map((p) => {
                     const isLow = p.stock <= p.minStockAlert;
                     const menuOpen = openMenuProductId === p.id;
                     return (
@@ -720,6 +779,38 @@ export function InventoryView() {
               </table>
             </div>
           </div>
+
+          {/* Mobile-Friendly Pagination Controls */}
+          {totalProductPages > 1 && (
+            <div className="bg-white rounded-2xl border border-slate-200 p-3.5 flex items-center justify-between gap-2 text-xs">
+              <span className="text-slate-500 font-mono text-[11px] sm:text-xs">
+                Page {productPage} of {totalProductPages} ({filteredProducts.length} items)
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={productPage <= 1}
+                  onClick={() => setProductPage((p) => Math.max(1, p - 1))}
+                  className="min-h-[38px] min-w-[38px] px-3 rounded-xl border border-slate-200 bg-white font-semibold text-slate-700 disabled:opacity-40 flex items-center justify-center gap-1 hover:bg-slate-50 active:scale-95 transition-all shadow-xs"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  <span className="hidden sm:inline">Prev</span>
+                </button>
+                <div className="px-2 font-mono font-bold text-slate-800 text-xs">
+                  {productPage} / {totalProductPages}
+                </div>
+                <button
+                  type="button"
+                  disabled={productPage >= totalProductPages}
+                  onClick={() => setProductPage((p) => Math.min(totalProductPages, p + 1))}
+                  className="min-h-[38px] min-w-[38px] px-3 rounded-xl border border-slate-200 bg-white font-semibold text-slate-700 disabled:opacity-40 flex items-center justify-center gap-1 hover:bg-slate-50 active:scale-95 transition-all shadow-xs"
+                >
+                  <span className="hidden sm:inline">Next</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
 

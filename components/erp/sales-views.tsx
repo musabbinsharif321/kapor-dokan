@@ -20,6 +20,9 @@ import {
   ArrowLeftRight,
   Camera,
   QrCode,
+  ChevronLeft,
+  ChevronRight,
+  Filter,
 } from 'lucide-react';
 import { useErp, CartLineItem } from '@/context/erp-context';
 import { QrCameraScannerModal } from './qr-camera-scanner-modal';
@@ -48,10 +51,15 @@ export function CustomerView() {
   } = useErp();
 
   const [search, setSearch] = useState('');
+  const [dueFilter, setDueFilter] = useState<'ALL' | 'DUE' | 'CLEAR'>('ALL');
+  const [customerPage, setCustomerPage] = useState(1);
+  const customerPageSize = 8;
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [dueCollectionTarget, setDueCollectionTarget] = useState<Customer | null>(null);
   const [collectAmount, setCollectAmount] = useState('');
+  const [collectMethod, setCollectMethod] = useState<PaymentMethod>('Cash');
+  const [collectNotes, setCollectNotes] = useState('');
   const [ledgerCustomer, setLedgerCustomer] = useState<Customer | null>(null);
 
   const [name, setName] = useState('');
@@ -99,20 +107,39 @@ export function CustomerView() {
   const handleCollectDue = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!dueCollectionTarget) return;
-    await collectCustomerDue(dueCollectionTarget.id, Number(collectAmount) || 0);
+    await collectCustomerDue(
+      dueCollectionTarget.id,
+      Number(collectAmount) || 0,
+      collectMethod,
+      collectNotes
+    );
     setDueCollectionTarget(null);
     setCollectAmount('');
+    setCollectMethod('Cash');
+    setCollectNotes('');
   };
 
   const filtered = customers.filter((c) => {
+    const matchesDue =
+      dueFilter === 'ALL'
+        ? true
+        : dueFilter === 'DUE'
+        ? c.totalDue > 0
+        : c.totalDue === 0;
     const q = search.trim().toLowerCase();
-    return (
+    const matchesSearch =
       !q ||
       c.name.toLowerCase().includes(q) ||
       c.phone.toLowerCase().includes(q) ||
-      c.address.toLowerCase().includes(q)
-    );
+      c.address.toLowerCase().includes(q);
+    return matchesDue && matchesSearch;
   });
+
+  const totalCustomerPages = Math.max(1, Math.ceil(filtered.length / customerPageSize));
+  const pagedCustomers = filtered.slice(
+    (customerPage - 1) * customerPageSize,
+    customerPage * customerPageSize
+  );
 
   const totalDueSum = customers.reduce((acc, c) => acc + c.totalDue, 0);
 
@@ -136,21 +163,66 @@ export function CustomerView() {
         </button>
       </div>
 
-      <div className="relative">
-        <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search customer by name, phone, or area..."
-          className="w-full min-h-[44px] pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-base sm:text-sm"
-        />
+      {/* Search and Due Filter Controls (Mobile Touch Friendly) */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setCustomerPage(1);
+            }}
+            placeholder="Search customer by name, phone, or area..."
+            className="w-full min-h-[44px] pl-10 pr-9 py-2 bg-white border border-slate-200 rounded-xl text-base sm:text-sm focus:border-blue-600 transition-colors"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch('');
+                setCustomerPage(1);
+              }}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar shrink-0">
+          {(
+            [
+              { id: 'ALL', label: 'All Accounts' },
+              { id: 'DUE', label: 'Has Due' },
+              { id: 'CLEAR', label: 'Account Clear' },
+            ] as const
+          ).map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => {
+                setDueFilter(item.id);
+                setCustomerPage(1);
+              }}
+              className={`min-h-[40px] px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
+                dueFilter === item.id
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {filtered.length === 0 ? (
+      {pagedCustomers.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center space-y-3">
           <Users className="w-8 h-8 text-slate-400 mx-auto" />
           <p className="text-sm font-bold text-slate-900">No Customers Found</p>
+          <p className="text-xs text-slate-400">Try changing your search term or due filter</p>
           <button
             onClick={openAdd}
             className="min-h-[42px] px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold"
@@ -159,91 +231,126 @@ export function CustomerView() {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-          {filtered.map((c) => (
-            <div
-              key={c.id}
-              className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 flex flex-col justify-between gap-4"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="font-bold text-sm sm:text-base text-slate-900 truncate">
-                    {c.name}
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mt-1">
-                    <span className="font-mono">{c.phone}</span>
-                    {c.address && (
-                      <>
-                        <span aria-hidden="true">·</span>
-                        <span>{c.address}</span>
-                      </>
-                    )}
+        <div className="space-y-3.5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+            {pagedCustomers.map((c) => (
+              <div
+                key={c.id}
+                className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 flex flex-col justify-between gap-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-bold text-sm sm:text-base text-slate-900 truncate">
+                      {c.name}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mt-1">
+                      <span className="font-mono">{c.phone}</span>
+                      {c.address && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span>{c.address}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="text-right font-mono tabular-nums shrink-0">
+                    <p
+                      className={`text-sm font-bold ${
+                        c.totalDue > 0 ? 'text-amber-600' : 'text-emerald-600'
+                      }`}
+                    >
+                      {c.totalDue > 0 ? `Due: ${formatBDT(c.totalDue, sym)}` : 'No Due'}
+                    </p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Sales: {formatBDT(c.totalSales, sym)}
+                    </p>
                   </div>
                 </div>
 
-                <div className="text-right font-mono tabular-nums shrink-0">
-                  <p
-                    className={`text-sm font-bold ${
-                      c.totalDue > 0 ? 'text-amber-600' : 'text-emerald-600'
-                    }`}
-                  >
-                    {c.totalDue > 0 ? `Due: ${formatBDT(c.totalDue, sym)}` : 'No Due'}
-                  </p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Sales: {formatBDT(c.totalSales, sym)}
-                  </p>
+                <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2.5">
+                  {c.totalDue > 0 ? (
+                    <button
+                      onClick={() => {
+                        setDueCollectionTarget(c);
+                        setCollectAmount(String(c.totalDue));
+                      }}
+                      className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 active:scale-95 text-white text-xs font-semibold shadow-xs"
+                    >
+                      Collect Due
+                    </button>
+                  ) : (
+                    <span className="text-xs text-emerald-700 font-medium">
+                      Account Clear
+                    </span>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      onClick={() => setLedgerCustomer(c)}
+                      className="min-h-[40px] px-3 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-1.5 hover:bg-slate-50 cursor-pointer"
+                    >
+                      <ClipboardList className="w-3.5 h-3.5" />
+                      <span>Ledger</span>
+                    </button>
+                    <a
+                      href={`tel:${c.phone}`}
+                      className="min-h-[40px] px-3 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-1.5 hover:bg-slate-50"
+                    >
+                      <Phone className="w-3.5 h-3.5" />
+                      <span>Call</span>
+                    </a>
+                    <button
+                      onClick={() => openEdit(c)}
+                      className="min-h-[40px] px-3 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-1.5 hover:bg-slate-50"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>Edit</span>
+                    </button>
+                    <button
+                      onClick={() => deleteCustomer(c.id)}
+                      className="min-h-[40px] min-w-[40px] rounded-xl border border-slate-200 text-slate-400 hover:text-red-600 flex items-center justify-center"
+                      title="Delete Customer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
+            ))}
+          </div>
 
-              <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2.5">
-                {c.totalDue > 0 ? (
-                  <button
-                    onClick={() => {
-                      setDueCollectionTarget(c);
-                      setCollectAmount(String(c.totalDue));
-                    }}
-                    className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold shadow-xs"
-                  >
-                    Collect Due
-                  </button>
-                ) : (
-                  <span className="text-xs text-emerald-700 font-medium">
-                    Account Clear
-                  </span>
-                )}
-
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <button
-                    onClick={() => setLedgerCustomer(c)}
-                    className="min-h-[40px] px-3 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-1.5 hover:bg-slate-50"
-                  >
-                    <ClipboardList className="w-3.5 h-3.5" />
-                    <span>Ledger</span>
-                  </button>
-                  <a
-                    href={`tel:${c.phone}`}
-                    className="min-h-[40px] px-3 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-1.5 hover:bg-slate-50"
-                  >
-                    <Phone className="w-3.5 h-3.5" />
-                    <span>Call</span>
-                  </a>
-                  <button
-                    onClick={() => openEdit(c)}
-                    className="min-h-[40px] px-3 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-1.5 hover:bg-slate-50"
-                  >
-                    <Edit3 className="w-3.5 h-3.5" />
-                    <span>Edit</span>
-                  </button>
-                  <button
-                    onClick={() => deleteCustomer(c.id)}
-                    className="min-h-[40px] min-w-[40px] rounded-xl border border-slate-200 text-slate-400 hover:text-red-600 flex items-center justify-center"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+          {/* Mobile-Friendly Pagination Controls */}
+          {totalCustomerPages > 1 && (
+            <div className="bg-white rounded-2xl border border-slate-200 p-3.5 flex items-center justify-between gap-2 text-xs">
+              <span className="text-slate-500 font-mono">
+                Page {customerPage} of {totalCustomerPages} ({filtered.length} customers)
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={customerPage <= 1}
+                  onClick={() => setCustomerPage((p) => Math.max(1, p - 1))}
+                  className="min-h-[38px] min-w-[38px] px-3 rounded-xl border border-slate-200 bg-white font-semibold text-slate-700 disabled:opacity-40 flex items-center justify-center gap-1"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  <span className="hidden sm:inline">Prev</span>
+                </button>
+                <div className="px-2 font-mono font-bold text-slate-800">
+                  {customerPage} / {totalCustomerPages}
                 </div>
+                <button
+                  type="button"
+                  disabled={customerPage >= totalCustomerPages}
+                  onClick={() => setCustomerPage((p) => Math.min(totalCustomerPages, p + 1))}
+                  className="min-h-[38px] min-w-[38px] px-3 rounded-xl border border-slate-200 bg-white font-semibold text-slate-700 disabled:opacity-40 flex items-center justify-center gap-1"
+                >
+                  <span className="hidden sm:inline">Next</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
               </div>
             </div>
-          ))}
+          )}
         </div>
       )}
 
@@ -369,18 +476,48 @@ export function CustomerView() {
               </p>
             </div>
             <div className="p-5 space-y-3">
-              <label className="block text-xs font-semibold text-slate-700">
-                Amount Received ({sym}) *
-              </label>
-              <input
-                type="number"
-                min="1"
-                max={dueCollectionTarget.totalDue}
-                required
-                value={collectAmount}
-                onChange={(e) => setCollectAmount(e.target.value)}
-                className="w-full min-h-[46px] px-3.5 py-2 rounded-xl border border-slate-200 text-base font-mono tabular-nums"
-              />
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Amount Received ({sym}) *
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max={dueCollectionTarget.totalDue}
+                  required
+                  value={collectAmount}
+                  onChange={(e) => setCollectAmount(e.target.value)}
+                  className="w-full min-h-[46px] px-3.5 py-2 rounded-xl border border-slate-200 text-base font-mono tabular-nums"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Payment Method
+                </label>
+                <select
+                  value={collectMethod}
+                  onChange={(e) => setCollectMethod(e.target.value as PaymentMethod)}
+                  className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 text-sm bg-white"
+                >
+                  {PAYMENT_METHODS.map((pm) => (
+                    <option key={pm} value={pm}>{pm}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Note / Reference (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Received via bKash / Cash counter"
+                  value={collectNotes}
+                  onChange={(e) => setCollectNotes(e.target.value)}
+                  className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 text-sm"
+                />
+              </div>
             </div>
             <div className="p-4 bg-slate-50 border-t border-slate-200 flex gap-3">
               <button
@@ -419,7 +556,8 @@ function CustomerLedgerModal({
   customer: Customer;
   onClose: () => void;
 }) {
-  const { salesInvoices, storeSettings, setPrintableReceipt, openReturnForInvoice } = useErp();
+  const { salesInvoices, ledgerTransactions, storeSettings, setPrintableReceipt, openReturnForInvoice } = useErp();
+  const [activeLedgerTab, setActiveLedgerTab] = useState<'all' | 'invoices' | 'payments'>('all');
   const sym = storeSettings.currencySymbol || '৳';
 
   const customerInvoices = salesInvoices.filter(
@@ -428,9 +566,73 @@ function CustomerLedgerModal({
       inv.customerName.toLowerCase() === customer.name.toLowerCase()
   );
 
+  const customerPayments = ledgerTransactions.filter(
+    (tx) =>
+      tx.partyId === customer.id ||
+      (tx.partyType === 'customer' && tx.partyName.toLowerCase() === customer.name.toLowerCase())
+  );
+
+  // Combine invoices and payment records into a unified chronological ledger stream
+  interface LedgerItem {
+    id: string;
+    date: string;
+    type: 'INVOICE' | 'PAYMENT';
+    title: string;
+    subtitle?: string;
+    details?: string;
+    debit?: number; // Invoiced charge (increases due)
+    credit?: number; // Payment made (decreases due)
+    paymentMethod?: string;
+    statusBadge?: string;
+    statusColor?: string;
+    rawInvoice?: typeof customerInvoices[0];
+  }
+
+  const combinedLedger: LedgerItem[] = [
+    ...customerInvoices.map((inv): LedgerItem => ({
+      id: inv.id,
+      date: inv.invoiceDate,
+      type: 'INVOICE',
+      title: `Invoice ${inv.invoiceNumber}`,
+      subtitle: `${inv.itemsCount} pcs · ${inv.primaryCategory}`,
+      details: inv.itemsSummary,
+      debit: inv.grandTotal,
+      credit: inv.paidAmount,
+      paymentMethod: inv.paymentMethod,
+      statusBadge: inv.status,
+      statusColor:
+        inv.status === 'Paid'
+          ? 'bg-emerald-100 text-emerald-800'
+          : inv.status === 'Partial'
+          ? 'bg-amber-100 text-amber-800'
+          : 'bg-red-100 text-red-800',
+      rawInvoice: inv,
+    })),
+    ...customerPayments.map((p): LedgerItem => ({
+      id: p.id,
+      date: p.date,
+      type: 'PAYMENT',
+      title: `Due Payment Received`,
+      subtitle: p.notes || (p.invoiceNumber ? `Ref: ${p.invoiceNumber}` : 'Customer Due Collection'),
+      credit: p.amount,
+      paymentMethod: p.paymentMethod,
+      statusBadge: 'Received',
+      statusColor: 'bg-emerald-100 text-emerald-800',
+    })),
+  ].sort((a, b) => b.date.localeCompare(a.date));
+
   const totalBilled = customerInvoices.reduce((acc, i) => acc + i.grandTotal, 0);
-  const totalPaid = customerInvoices.reduce((acc, i) => acc + i.paidAmount, 0);
+  const totalPaidDirect = customerInvoices.reduce((acc, i) => acc + i.paidAmount, 0);
+  const totalDuePayments = customerPayments.reduce((acc, p) => acc + p.amount, 0);
+  const totalPaid = totalPaidDirect + totalDuePayments;
   const currentDue = customer.totalDue;
+
+  const displayItems =
+    activeLedgerTab === 'invoices'
+      ? combinedLedger.filter((item) => item.type === 'INVOICE')
+      : activeLedgerTab === 'payments'
+      ? combinedLedger.filter((item) => item.type === 'PAYMENT')
+      : combinedLedger;
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
@@ -479,91 +681,153 @@ function CustomerLedgerModal({
           </div>
         </div>
 
-        {/* Invoices List */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-3">
-          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-            Purchase Transaction History ({customerInvoices.length} invoices)
-          </h4>
+        {/* Sub-Tabs: All / Invoices / Payments */}
+        <div className="px-5 pt-3 pb-0 flex items-center gap-2 border-b border-slate-200 bg-white">
+          <button
+            onClick={() => setActiveLedgerTab('all')}
+            className={`pb-2.5 px-2 text-xs font-semibold border-b-2 transition-colors ${
+              activeLedgerTab === 'all'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            All Activity ({combinedLedger.length})
+          </button>
+          <button
+            onClick={() => setActiveLedgerTab('invoices')}
+            className={`pb-2.5 px-2 text-xs font-semibold border-b-2 transition-colors ${
+              activeLedgerTab === 'invoices'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            Invoices ({customerInvoices.length})
+          </button>
+          <button
+            onClick={() => setActiveLedgerTab('payments')}
+            className={`pb-2.5 px-2 text-xs font-semibold border-b-2 transition-colors ${
+              activeLedgerTab === 'payments'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            Due Payments Received ({customerPayments.length})
+          </button>
+        </div>
 
-          {customerInvoices.length === 0 ? (
+        {/* Ledger Items List */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-3">
+          {displayItems.length === 0 ? (
             <div className="py-12 text-center space-y-2">
               <ClipboardList className="w-8 h-8 text-slate-300 mx-auto" />
-              <p className="text-sm font-medium text-slate-700">No purchase invoices found for this customer.</p>
-              <p className="text-xs text-slate-400">Invoices created during POS checkout will appear here automatically.</p>
+              <p className="text-sm font-medium text-slate-700">No records found in this view.</p>
+              <p className="text-xs text-slate-400">Transactions and invoice records will appear here automatically.</p>
             </div>
           ) : (
-            customerInvoices.map((inv) => (
+            displayItems.map((item) => (
               <div
-                key={inv.id}
-                className="bg-white rounded-xl border border-slate-200 p-4 space-y-3 hover:border-slate-300 transition-colors"
+                key={item.id}
+                className={`bg-white rounded-xl border p-4 space-y-3 transition-colors ${
+                  item.type === 'PAYMENT'
+                    ? 'border-emerald-200 bg-emerald-50/20'
+                    : 'border-slate-200 hover:border-slate-300'
+                }`}
               >
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold font-mono text-slate-900">{inv.invoiceNumber}</span>
+                    <span className="font-bold font-mono text-slate-900">{item.title}</span>
                     <span className="text-slate-400">·</span>
-                    <span className="text-slate-600 font-mono">{inv.invoiceDate}</span>
+                    <span className="text-slate-600 font-mono">{item.date}</span>
+                    {item.paymentMethod && (
+                      <>
+                        <span className="text-slate-400">·</span>
+                        <span className="text-slate-500 font-medium">Via {item.paymentMethod}</span>
+                      </>
+                    )}
                   </div>
-                  <span
-                    className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${
-                      inv.status === 'Paid'
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : inv.status === 'Partial'
-                        ? 'bg-amber-100 text-amber-800'
-                        : 'bg-red-100 text-red-800'
-                    }`}
-                  >
-                    {inv.status}
-                  </span>
+                  {item.statusBadge && (
+                    <span
+                      className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${
+                        item.statusColor || 'bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      {item.statusBadge}
+                    </span>
+                  )}
                 </div>
 
-                <div className="text-xs text-slate-700 bg-slate-50 p-2.5 rounded-lg font-mono">
-                  <p className="font-semibold text-slate-900">{inv.itemsSummary}</p>
-                  <p className="text-[11px] text-slate-500 mt-0.5">Total Units: {inv.itemsCount} pcs · Category: {inv.primaryCategory}</p>
-                </div>
+                {item.details && (
+                  <div className="text-xs text-slate-700 bg-slate-50 p-2.5 rounded-lg font-mono">
+                    <p className="font-semibold text-slate-900">{item.details}</p>
+                    {item.subtitle && (
+                      <p className="text-[11px] text-slate-500 mt-0.5">{item.subtitle}</p>
+                    )}
+                  </div>
+                )}
+
+                {!item.details && item.subtitle && (
+                  <p className="text-xs text-slate-600 italic bg-white/60 p-2 rounded border border-slate-100">
+                    {item.subtitle}
+                  </p>
+                )}
 
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-2 border-t border-slate-100 font-mono tabular-nums text-xs">
                   <div className="flex flex-wrap gap-x-3 gap-y-1 text-slate-600">
-                    <span>Grand: <strong className="text-slate-900">{formatBDT(inv.grandTotal, sym)}</strong></span>
-                    <span>Paid: <strong className="text-emerald-600">{formatBDT(inv.paidAmount, sym)}</strong></span>
-                    <span>Due: <strong className="text-amber-600">{formatBDT(inv.dueAmount, sym)}</strong></span>
+                    {item.debit !== undefined && (
+                      <span>
+                        Billed: <strong className="text-slate-900">{formatBDT(item.debit, sym)}</strong>
+                      </span>
+                    )}
+                    {item.credit !== undefined && (
+                      <span>
+                        Paid: <strong className="text-emerald-600">{formatBDT(item.credit, sym)}</strong>
+                      </span>
+                    )}
+                    {item.rawInvoice && item.rawInvoice.dueAmount > 0 && (
+                      <span>
+                        Due: <strong className="text-amber-600">{formatBDT(item.rawInvoice.dueAmount, sym)}</strong>
+                      </span>
+                    )}
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => {
-                        onClose();
-                        openReturnForInvoice(inv);
-                      }}
-                      className="min-h-[36px] px-3 rounded-lg border border-purple-200 bg-purple-50 hover:bg-purple-100 font-semibold text-purple-700 flex items-center gap-1.5 transition-colors cursor-pointer"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" />
-                      <span>Return / Exchange</span>
-                    </button>
-                    <button
-                      onClick={() => {
-                        setPrintableReceipt({
-                          type: 'SALES',
-                          invoiceNumber: inv.invoiceNumber,
-                          date: inv.invoiceDate,
-                          partyName: inv.customerName,
-                          partyPhone: inv.customerPhone,
-                          itemsSummary: inv.itemsSummary,
-                          itemsCount: inv.itemsCount,
-                          subtotal: inv.subtotal,
-                          discount: inv.discount,
-                          grandTotal: inv.grandTotal,
-                          paidAmount: inv.paidAmount,
-                          dueAmount: inv.dueAmount,
-                          paymentMethod: inv.paymentMethod,
-                          status: inv.status,
-                        });
-                      }}
-                      className="min-h-[36px] px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 font-semibold text-slate-700 flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Printer className="w-3.5 h-3.5" />
-                      <span>Print Invoice</span>
-                    </button>
-                  </div>
+                  {item.rawInvoice && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          onClose();
+                          openReturnForInvoice(item.rawInvoice!);
+                        }}
+                        className="min-h-[36px] px-3 rounded-lg border border-purple-200 bg-purple-50 hover:bg-purple-100 font-semibold text-purple-700 flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Return / Exchange</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setPrintableReceipt({
+                            type: 'SALES',
+                            invoiceNumber: item.rawInvoice!.invoiceNumber,
+                            date: item.rawInvoice!.invoiceDate,
+                            partyName: item.rawInvoice!.customerName,
+                            partyPhone: item.rawInvoice!.customerPhone,
+                            itemsSummary: item.rawInvoice!.itemsSummary,
+                            itemsCount: item.rawInvoice!.itemsCount,
+                            subtotal: item.rawInvoice!.subtotal,
+                            discount: item.rawInvoice!.discount,
+                            grandTotal: item.rawInvoice!.grandTotal,
+                            paidAmount: item.rawInvoice!.paidAmount,
+                            dueAmount: item.rawInvoice!.dueAmount,
+                            paymentMethod: item.rawInvoice!.paymentMethod,
+                            status: item.rawInvoice!.status,
+                          });
+                        }}
+                        className="min-h-[36px] px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 font-semibold text-slate-700 flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                        <span>Print Invoice</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             ))
@@ -973,6 +1237,7 @@ export function SalesInvoiceView() {
     salesInvoices,
     returns,
     storeSettings,
+    showToast,
     createSalesInvoice,
     settleSalesInvoiceDue,
     deleteSalesInvoice,
@@ -981,6 +1246,8 @@ export function SalesInvoiceView() {
     setPendingOrderForInvoice,
     pendingReturnInvoice,
     setPendingReturnInvoice,
+    pendingCartProducts,
+    clearPendingCartProducts,
     openReturnForInvoice,
     processReturnExchange,
   } = useErp();
@@ -1013,9 +1280,15 @@ export function SalesInvoiceView() {
   // Integrated History Tabs
   const [historyTab, setHistoryTab] = useState<'INVOICES' | 'RETURNS'>('INVOICES');
   const [invoiceSearch, setInvoiceSearch] = useState('');
+  const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<'ALL' | 'Paid' | 'Partial' | 'Due'>('ALL');
+  const [invoicePage, setInvoicePage] = useState(1);
+  const invoicePageSize = 8;
+
   const [returnModalOpen, setReturnModalOpen] = useState(false);
   const [returnsSearch, setReturnsSearch] = useState('');
   const [returnsFilterType, setReturnsFilterType] = useState<'ALL' | 'RETURN_REFUND' | 'EXCHANGE'>('ALL');
+  const [returnsPage, setReturnsPage] = useState(1);
+  const returnsPageSize = 8;
 
   // Return Form States
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string>('');
@@ -1074,6 +1347,51 @@ export function SalesInvoiceView() {
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingReturnInvoice]);
+
+  useEffect(() => {
+    if (pendingCartProducts.length > 0) {
+      setCart((prevCart) => {
+        let updated = [...prevCart];
+        pendingCartProducts.forEach((p) => {
+          const currentProd = products.find((x) => x.id === p.id) || p;
+          if (currentProd.stock <= 0) {
+            showToast(`Out of stock: ${currentProd.name} has 0 pcs`, 'error');
+            return;
+          }
+          const existing = updated.find((item) => item.productId === p.id);
+          if (existing) {
+            if (existing.quantity >= currentProd.stock) {
+              showToast(
+                `Stock limit reached: Only ${currentProd.stock} pcs available for ${currentProd.name}`,
+                'error'
+              );
+            } else {
+              updated = updated.map((item) =>
+                item.productId === p.id
+                  ? { ...item, quantity: Math.min(currentProd.stock, item.quantity + 1) }
+                  : item
+              );
+            }
+          } else {
+            updated.push({
+              productId: currentProd.id,
+              name: currentProd.name,
+              sku: currentProd.sku,
+              category: currentProd.category,
+              size: currentProd.size,
+              color: currentProd.color,
+              unitPrice: currentProd.sellingPrice,
+              unitCost: currentProd.purchasePrice,
+              quantity: 1,
+            });
+          }
+        });
+        syncPaidWithCart(updated, discount);
+        return updated;
+      });
+      clearPendingCartProducts();
+    }
+  }, [pendingCartProducts, clearPendingCartProducts, discount, products, showToast]);
 
   const resetReturnForm = () => {
     setSelectedInvoiceId('');
@@ -1249,11 +1567,22 @@ export function SalesInvoiceView() {
   const addToCart = (prodId: string) => {
     const p = products.find((x) => x.id === prodId);
     if (!p) return;
+    if (p.stock <= 0) {
+      showToast(`Out of stock: ${p.name} has 0 pcs in stock`, 'error');
+      return;
+    }
     const existing = cart.find((item) => item.productId === p.id);
+    if (existing && existing.quantity >= p.stock) {
+      showToast(
+        `Cannot add more: Only ${p.stock} pcs available in stock for ${p.name}`,
+        'error'
+      );
+      return;
+    }
     const nextCart = existing
       ? cart.map((item) =>
           item.productId === p.id
-            ? { ...item, quantity: Math.min(Math.max(1, p.stock), item.quantity + 1) }
+            ? { ...item, quantity: Math.min(p.stock, item.quantity + 1) }
             : item
         )
       : [
@@ -1275,10 +1604,22 @@ export function SalesInvoiceView() {
   };
 
   const updateCartQty = (productId: string, delta: number) => {
+    const p = products.find((x) => x.id === productId);
+    if (delta > 0 && p) {
+      const existing = cart.find((item) => item.productId === productId);
+      if (existing && existing.quantity >= p.stock) {
+        showToast(
+          `Stock limit reached: Only ${p.stock} pcs available in stock for ${p.name}`,
+          'error'
+        );
+        return;
+      }
+    }
     const nextCart = cart
       .map((item) => {
         if (item.productId !== productId) return item;
-        const next = item.quantity + delta;
+        const maxLimit = p ? p.stock : 9999;
+        const next = Math.min(maxLimit, item.quantity + delta);
         return next > 0 ? { ...item, quantity: next } : null;
       })
       .filter(Boolean) as CartLineItem[];
@@ -1289,6 +1630,20 @@ export function SalesInvoiceView() {
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
     if (cart.length === 0) return;
+
+    // Strict validation: check that no line item exceeds current inventory stock
+    for (const item of cart) {
+      const prod = products.find((p) => p.id === item.productId);
+      if (!prod) continue;
+      if (item.quantity > prod.stock) {
+        showToast(
+          `Cannot invoice ${item.name}: ${item.quantity} requested, but only ${prod.stock} pcs in stock!`,
+          'error'
+        );
+        return;
+      }
+    }
+
     setSubmitting(true);
     try {
       await createSalesInvoice({
@@ -1332,15 +1687,23 @@ export function SalesInvoiceView() {
   const exProd = products.find((p) => p.id === exchangeProductId);
 
   const filteredInvoices = salesInvoices.filter((inv) => {
+    const matchesStatus =
+      invoiceStatusFilter === 'ALL' || inv.status === invoiceStatusFilter;
     const q = invoiceSearch.trim().toLowerCase();
-    if (!q) return true;
-    return (
+    const matchesSearch =
+      !q ||
       inv.invoiceNumber.toLowerCase().includes(q) ||
       inv.customerName.toLowerCase().includes(q) ||
       (inv.customerPhone && inv.customerPhone.toLowerCase().includes(q)) ||
-      inv.itemsSummary.toLowerCase().includes(q)
-    );
+      inv.itemsSummary.toLowerCase().includes(q);
+    return matchesStatus && matchesSearch;
   });
+
+  const totalInvoicePages = Math.max(1, Math.ceil(filteredInvoices.length / invoicePageSize));
+  const pagedInvoices = filteredInvoices.slice(
+    (invoicePage - 1) * invoicePageSize,
+    invoicePage * invoicePageSize
+  );
 
   const filteredReturns = returns.filter((r) => {
     const matchesFilter =
@@ -1356,6 +1719,12 @@ export function SalesInvoiceView() {
       (r.exchangeItemSummary && r.exchangeItemSummary.toLowerCase().includes(q));
     return matchesFilter && matchesSearch;
   });
+
+  const totalReturnPages = Math.max(1, Math.ceil(filteredReturns.length / returnsPageSize));
+  const pagedReturns = filteredReturns.slice(
+    (returnsPage - 1) * returnsPageSize,
+    returnsPage * returnsPageSize
+  );
 
   return (
     <div className="space-y-6">
@@ -1430,33 +1799,56 @@ export function SalesInvoiceView() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[380px] overflow-y-auto pr-1">
             {availableProducts.map((p) => {
               const inCart = cart.find((c) => c.productId === p.id)?.quantity || 0;
+              const isMaxStock = inCart >= p.stock;
               return (
                 <button
                   type="button"
                   key={p.id}
-                  disabled={p.stock <= 0}
+                  disabled={p.stock <= 0 || isMaxStock}
                   onClick={() => addToCart(p.id)}
                   className={`min-h-[68px] p-3 rounded-xl border text-left transition-all flex items-center justify-between gap-2 ${
-                    inCart > 0
+                    p.stock <= 0
+                      ? 'border-slate-200 bg-slate-50 opacity-40 cursor-not-allowed'
+                      : isMaxStock
+                      ? 'border-amber-300 bg-amber-50/50 opacity-60 cursor-not-allowed'
+                      : inCart > 0
                       ? 'border-blue-600 bg-blue-50/40'
                       : 'border-slate-200 hover:border-slate-300 bg-white'
-                  } disabled:opacity-40`}
+                  }`}
+                  title={
+                    p.stock <= 0
+                      ? 'Out of stock'
+                      : isMaxStock
+                      ? `Maximum ${p.stock} pcs already in bill`
+                      : 'Add to bill'
+                  }
                 >
                   <div className="min-w-0">
                     <p className="text-xs font-bold text-slate-900 truncate">{p.name}</p>
                     <p className="text-[11px] text-slate-500 mt-0.5">
-                      {p.category} · Size {p.size} · {p.stock} pcs
+                      {p.category} · Size {p.size} · Stock:{' '}
+                      <span className={`font-semibold ${p.stock <= 0 ? 'text-red-500' : 'text-slate-700'}`}>
+                        {p.stock} pcs
+                      </span>
                     </p>
                   </div>
                   <div className="text-right font-mono tabular-nums shrink-0">
                     <p className="text-xs font-bold text-slate-900">
                       {formatBDT(p.sellingPrice, sym)}
                     </p>
-                    {inCart > 0 && (
+                    {p.stock <= 0 ? (
+                      <span className="text-[10px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded">
+                        Out of stock
+                      </span>
+                    ) : isMaxStock ? (
+                      <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">
+                        Max ({p.stock})
+                      </span>
+                    ) : inCart > 0 ? (
                       <span className="text-[11px] font-bold text-blue-600">
                         +{inCart} in bill
                       </span>
-                    )}
+                    ) : null}
                   </div>
                 </button>
               );
@@ -1525,38 +1917,62 @@ export function SalesInvoiceView() {
                 Tap any garment item on the left to add it to this invoice.
               </p>
             ) : (
-              cart.map((item) => (
-                <div
-                  key={item.productId}
-                  className="flex items-center justify-between gap-2 bg-slate-50 px-3 py-2 rounded-xl text-xs"
-                >
-                  <div className="min-w-0">
-                    <p className="font-bold text-slate-900 truncate">{item.name}</p>
-                    <p className="text-[11px] text-slate-500 font-mono tabular-nums">
-                      Size {item.size} · {formatBDT(item.unitPrice, sym)} each
-                    </p>
+              cart.map((item) => {
+                const prod = products.find((x) => x.id === item.productId);
+                const isMax = prod ? item.quantity >= prod.stock : false;
+                return (
+                  <div
+                    key={item.productId}
+                    className="flex items-center justify-between gap-2 bg-slate-50 px-3 py-2 rounded-xl text-xs"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-bold text-slate-900 truncate">{item.name}</p>
+                      <p className="text-[11px] text-slate-500 font-mono tabular-nums flex items-center gap-1.5 flex-wrap">
+                        <span>Size {item.size}</span>
+                        <span>·</span>
+                        <span>{formatBDT(item.unitPrice, sym)} each</span>
+                        {prod && (
+                          <span
+                            className={`text-[10px] font-sans px-1.5 py-0.2 rounded ${
+                              isMax
+                                ? 'bg-amber-100 text-amber-800 font-semibold'
+                                : 'bg-slate-200/60 text-slate-600'
+                            }`}
+                          >
+                            {isMax ? `Max ${prod.stock} pcs in stock` : `Stock: ${prod.stock}`}
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => updateCartQty(item.productId, -1)}
+                        className="w-7 h-7 rounded-lg border border-slate-200 bg-white flex items-center justify-center hover:bg-slate-100"
+                        title="Reduce 1"
+                      >
+                        <Minus className="w-3 h-3" />
+                      </button>
+                      <span className="w-6 text-center font-mono font-bold">
+                        {item.quantity}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={isMax}
+                        onClick={() => updateCartQty(item.productId, 1)}
+                        className={`w-7 h-7 rounded-lg border border-slate-200 flex items-center justify-center ${
+                          isMax
+                            ? 'bg-slate-100 text-slate-300 cursor-not-allowed opacity-40'
+                            : 'bg-white text-slate-700 hover:bg-slate-100'
+                        }`}
+                        title={isMax ? `Only ${prod?.stock} pcs in stock` : 'Add 1'}
+                      >
+                        <Plus className="w-3 h-3" />
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => updateCartQty(item.productId, -1)}
-                      className="w-7 h-7 rounded-lg border border-slate-200 bg-white flex items-center justify-center"
-                    >
-                      <Minus className="w-3 h-3" />
-                    </button>
-                    <span className="w-6 text-center font-mono font-bold">
-                      {item.quantity}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => updateCartQty(item.productId, 1)}
-                      className="w-7 h-7 rounded-lg border border-slate-200 bg-white flex items-center justify-center"
-                    >
-                      <Plus className="w-3 h-3" />
-                    </button>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
 
@@ -1652,106 +2068,207 @@ export function SalesInvoiceView() {
 
       {/* Sales Invoices History Ledger */}
       <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6 space-y-4">
-        <div>
-          <h3 className="text-base font-bold text-slate-900">
-            Sales Invoices History ({salesInvoices.length})
-          </h3>
-          <p className="text-xs text-slate-500">
-            Tap Print to view receipt or Collect Due on partial/unpaid bills
-          </p>
-        </div>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base font-bold text-slate-900">
+              Sales Invoices History ({filteredInvoices.length})
+            </h3>
+            <p className="text-xs text-slate-500">
+              Tap Receipt to print or Collect Due on partial/unpaid bills
+            </p>
+          </div>
 
-        <div className="space-y-3">
-          {salesInvoices.map((inv) => (
-            <div
-              key={inv.id}
-              className="p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-            >
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="font-mono font-bold text-slate-900">
-                    {inv.invoiceNumber}
-                  </span>
-                  <span aria-hidden="true">·</span>
-                  <span className="font-bold text-slate-900 text-sm">
-                    {inv.customerName}
-                  </span>
-                  <span aria-hidden="true">·</span>
-                  <span className="font-mono text-slate-500">{inv.invoiceDate}</span>
-                </div>
-                <p className="text-xs text-slate-600 mt-1">{inv.itemsSummary}</p>
-                <div className="flex flex-wrap items-center gap-2 text-xs font-mono tabular-nums mt-1.5">
-                  <span className="text-slate-700">
-                    Total: <strong>{formatBDT(inv.grandTotal, sym)}</strong>
-                  </span>
-                  <span aria-hidden="true">·</span>
-                  <span className="text-emerald-700">
-                    Paid: {formatBDT(inv.paidAmount, sym)} ({inv.paymentMethod})
-                  </span>
-                  {inv.dueAmount > 0 && (
-                    <>
-                      <span aria-hidden="true">·</span>
-                      <span className="text-red-600 font-bold">
-                        Due: {formatBDT(inv.dueAmount, sym)}
-                      </span>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                {inv.dueAmount > 0 && inv.status !== 'Paid' && (
-                  <button
-                    onClick={() => {
-                      setSettleTarget(inv);
-                      setSettleAmount(String(inv.dueAmount));
-                    }}
-                    className="min-h-[40px] px-3 py-1.5 rounded-xl bg-amber-600 text-white text-xs font-semibold"
-                  >
-                    Collect Due
-                  </button>
-                )}
+          {/* Quick Search & Status Filter (Mobile-first full width) */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            <div className="relative flex-1 sm:w-56">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Search invoice, customer, item..."
+                value={invoiceSearch}
+                onChange={(e) => {
+                  setInvoiceSearch(e.target.value);
+                  setInvoicePage(1);
+                }}
+                className="w-full min-h-[40px] pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:border-blue-500 transition-colors"
+              />
+              {invoiceSearch && (
                 <button
-                  onClick={() => openReturnForInvoice(inv)}
-                  className="min-h-[40px] px-3 py-1.5 rounded-xl border border-purple-200 bg-purple-50 text-xs font-semibold text-purple-700 flex items-center gap-1.5 hover:bg-purple-100 transition-colors cursor-pointer"
+                  type="button"
+                  onClick={() => {
+                    setInvoiceSearch('');
+                    setInvoicePage(1);
+                  }}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
                 >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Return</span>
+                  <X className="w-3.5 h-3.5" />
                 </button>
-                <button
-                  onClick={() =>
-                    setPrintableReceipt({
-                      type: 'SALES',
-                      invoiceNumber: inv.invoiceNumber,
-                      date: inv.invoiceDate,
-                      partyName: inv.customerName,
-                      partyPhone: inv.customerPhone,
-                      itemsSummary: inv.itemsSummary,
-                      itemsCount: inv.itemsCount,
-                      subtotal: inv.subtotal,
-                      discount: inv.discount,
-                      grandTotal: inv.grandTotal,
-                      paidAmount: inv.paidAmount,
-                      dueAmount: inv.dueAmount,
-                      paymentMethod: inv.paymentMethod,
-                      status: inv.status,
-                    })
-                  }
-                  className="min-h-[40px] px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-1.5 hover:bg-slate-50 cursor-pointer"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>Receipt</span>
-                </button>
-                <button
-                  onClick={() => deleteSalesInvoice(inv.id)}
-                  className="min-h-[40px] min-w-[40px] rounded-xl border border-slate-200 text-slate-400 hover:text-red-600 flex items-center justify-center"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
+              )}
             </div>
-          ))}
+
+            <div className="flex items-center gap-1 overflow-x-auto pb-0.5 no-scrollbar">
+              {(['ALL', 'Paid', 'Partial', 'Due'] as const).map((st) => (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() => {
+                    setInvoiceStatusFilter(st);
+                    setInvoicePage(1);
+                  }}
+                  className={`min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
+                    invoiceStatusFilter === st
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {st === 'ALL' ? 'All' : st}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
+
+        {pagedInvoices.length === 0 ? (
+          <div className="py-12 text-center text-xs text-slate-400 bg-slate-50 rounded-xl">
+            No sales invoices match your filter
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {pagedInvoices.map((inv) => (
+              <div
+                key={inv.id}
+                className="p-3.5 sm:p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white hover:border-slate-300 transition-colors"
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="font-mono font-bold text-slate-900">
+                      {inv.invoiceNumber}
+                    </span>
+                    <span aria-hidden="true" className="text-slate-300">·</span>
+                    <span className="font-bold text-slate-900 text-sm truncate">
+                      {inv.customerName}
+                    </span>
+                    <span aria-hidden="true" className="text-slate-300">·</span>
+                    <span className="font-mono text-slate-500">{inv.invoiceDate}</span>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        inv.status === 'Paid'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : inv.status === 'Partial'
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-red-100 text-red-800'
+                      }`}
+                    >
+                      {inv.status}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 mt-1 line-clamp-1">{inv.itemsSummary}</p>
+                  <div className="flex flex-wrap items-center gap-2 text-xs font-mono tabular-nums mt-1.5">
+                    <span className="text-slate-700">
+                      Total: <strong>{formatBDT(inv.grandTotal, sym)}</strong>
+                    </span>
+                    <span aria-hidden="true" className="text-slate-300">·</span>
+                    <span className="text-emerald-700 font-semibold">
+                      Paid: {formatBDT(inv.paidAmount, sym)} ({inv.paymentMethod})
+                    </span>
+                    {inv.dueAmount > 0 && (
+                      <>
+                        <span aria-hidden="true" className="text-slate-300">·</span>
+                        <span className="text-red-600 font-bold">
+                          Due: {formatBDT(inv.dueAmount, sym)}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 self-end sm:self-center">
+                  {inv.dueAmount > 0 && inv.status !== 'Paid' && (
+                    <button
+                      onClick={() => {
+                        setSettleTarget(inv);
+                        setSettleAmount(String(inv.dueAmount));
+                      }}
+                      className="min-h-[38px] px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 active:scale-95 text-white text-xs font-semibold shadow-xs"
+                    >
+                      Collect Due
+                    </button>
+                  )}
+                  <button
+                    onClick={() => openReturnForInvoice(inv)}
+                    className="min-h-[38px] px-2.5 sm:px-3 py-1.5 rounded-xl border border-purple-200 bg-purple-50 text-xs font-semibold text-purple-700 flex items-center gap-1 hover:bg-purple-100 transition-colors cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Return</span>
+                  </button>
+                  <button
+                    onClick={() =>
+                      setPrintableReceipt({
+                        type: 'SALES',
+                        invoiceNumber: inv.invoiceNumber,
+                        date: inv.invoiceDate,
+                        partyName: inv.customerName,
+                        partyPhone: inv.customerPhone,
+                        itemsSummary: inv.itemsSummary,
+                        itemsCount: inv.itemsCount,
+                        subtotal: inv.subtotal,
+                        discount: inv.discount,
+                        grandTotal: inv.grandTotal,
+                        paidAmount: inv.paidAmount,
+                        dueAmount: inv.dueAmount,
+                        paymentMethod: inv.paymentMethod,
+                        status: inv.status,
+                      })
+                    }
+                    className="min-h-[38px] px-2.5 sm:px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-1 hover:bg-slate-50 cursor-pointer"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Receipt</span>
+                  </button>
+                  <button
+                    onClick={() => deleteSalesInvoice(inv.id)}
+                    className="min-h-[38px] min-w-[38px] rounded-xl border border-slate-200 text-slate-400 hover:text-red-600 flex items-center justify-center"
+                    title="Delete Invoice"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Mobile-Friendly Pagination Controls */}
+        {totalInvoicePages > 1 && (
+          <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 text-xs">
+            <span className="text-slate-500 font-mono">
+              Page {invoicePage} of {totalInvoicePages} ({filteredInvoices.length} invoices)
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={invoicePage <= 1}
+                onClick={() => setInvoicePage((p) => Math.max(1, p - 1))}
+                className="min-h-[38px] min-w-[38px] px-3 rounded-xl border border-slate-200 bg-white font-semibold text-slate-700 disabled:opacity-40 flex items-center justify-center gap-1"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                <span className="hidden sm:inline">Prev</span>
+              </button>
+              <div className="px-2 font-mono font-bold text-slate-800">
+                {invoicePage} / {totalInvoicePages}
+              </div>
+              <button
+                type="button"
+                disabled={invoicePage >= totalInvoicePages}
+                onClick={() => setInvoicePage((p) => Math.min(totalInvoicePages, p + 1))}
+                className="min-h-[38px] min-w-[38px] px-3 rounded-xl border border-slate-200 bg-white font-semibold text-slate-700 disabled:opacity-40 flex items-center justify-center gap-1"
+              >
+                <span className="hidden sm:inline">Next</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Settle Sales Invoice Due Modal */}

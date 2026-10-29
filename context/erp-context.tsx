@@ -49,6 +49,7 @@ import {
   PaymentStatus,
   ReturnExchangeRecord,
   ReturnType,
+  LedgerTransaction,
   sanitizeDocId,
 } from '@/lib/types';
 import {
@@ -117,6 +118,7 @@ interface ErpContextValue {
   suppliers: Supplier[];
   purchaseInvoices: PurchaseInvoice[];
   expenses: Expense[];
+  ledgerTransactions: LedgerTransaction[];
   storeSettings: StoreSettings;
   toast: ToastMessage | null;
   showToast: (title: string, type?: 'success' | 'error' | 'info') => void;
@@ -124,6 +126,9 @@ interface ErpContextValue {
   setPrintableReceipt: (receipt: PrintableReceiptData | null) => void;
   pendingOrderForInvoice: SalesOrder | null;
   setPendingOrderForInvoice: (order: SalesOrder | null) => void;
+  pendingCartProducts: Product[];
+  addPendingCartProduct: (product: Product) => void;
+  clearPendingCartProducts: () => void;
   signInWithGoogle: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (email: string, password: string) => Promise<void>;
@@ -141,7 +146,12 @@ interface ErpContextValue {
     data: Omit<Customer, 'id' | 'ownerId' | 'createdAt' | 'updatedAt'>,
     existingId?: string
   ) => Promise<void>;
-  collectCustomerDue: (customerId: string, amountCollected: number) => Promise<void>;
+  collectCustomerDue: (
+    customerId: string,
+    amountCollected: number,
+    paymentMethod?: PaymentMethod,
+    notes?: string
+  ) => Promise<void>;
   deleteCustomer: (customerId: string) => Promise<void>;
   saveSalesOrder: (
     data: Omit<SalesOrder, 'id' | 'ownerId' | 'createdAt' | 'updatedAt'>,
@@ -170,7 +180,12 @@ interface ErpContextValue {
     data: Omit<Supplier, 'id' | 'ownerId' | 'createdAt' | 'updatedAt'>,
     existingId?: string
   ) => Promise<void>;
-  paySupplierDue: (supplierId: string, amountPaid: number) => Promise<void>;
+  paySupplierDue: (
+    supplierId: string,
+    amountPaid: number,
+    paymentMethod?: PaymentMethod,
+    notes?: string
+  ) => Promise<void>;
   deleteSupplier: (supplierId: string) => Promise<void>;
   createPurchaseInvoice: (params: {
     supplierId: string;
@@ -250,6 +265,7 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
   const [purchaseInvoices, setPurchaseInvoices] = useState<PurchaseInvoice[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [returns, setReturns] = useState<ReturnExchangeRecord[]>([]);
+  const [ledgerTransactions, setLedgerTransactions] = useState<LedgerTransaction[]>([]);
   const [storeSettings, setStoreSettings] = useState<StoreSettings>({
     id: 'default',
     ownerId: '',
@@ -260,6 +276,15 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
   const [printableReceipt, setPrintableReceipt] = useState<PrintableReceiptData | null>(null);
   const [pendingOrderForInvoice, setPendingOrderForInvoice] = useState<SalesOrder | null>(null);
   const [pendingReturnInvoice, setPendingReturnInvoice] = useState<SalesInvoice | null>(null);
+  const [pendingCartProducts, setPendingCartProducts] = useState<Product[]>([]);
+
+  const addPendingCartProduct = useCallback((product: Product) => {
+    setPendingCartProducts((prev) => [...prev, product]);
+  }, []);
+
+  const clearPendingCartProducts = useCallback(() => {
+    setPendingCartProducts([]);
+  }, []);
 
   const openReturnForInvoice = useCallback((inv: SalesInvoice) => {
     setPendingReturnInvoice(inv);
@@ -313,6 +338,7 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
         setPurchaseInvoices([]);
         setExpenses([]);
         setReturns([]);
+        setLedgerTransactions([]);
         setDataLoading(false);
       } else {
         setDataLoading(true);
@@ -453,6 +479,22 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
       (err) => handleFirestoreError(err, OperationType.LIST, 'returns')
     );
 
+    const qLedger = query(collection(db, 'ledgerTransactions'), where('ownerId', '==', uid));
+    const unsubLedger = onSnapshot(
+      qLedger,
+      (snap) => {
+        const list = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<LedgerTransaction, 'id'>),
+        }));
+        list.sort((a, b) => b.date.localeCompare(a.date));
+        setLedgerTransactions(list);
+      },
+      (err) => {
+        console.warn('Live ledgerTransactions listener warning (fallback to local state):', err);
+      }
+    );
+
     const settingsRef = doc(db, 'storeSettings', uid);
     const unsubSettings = onSnapshot(
       settingsRef,
@@ -480,6 +522,8 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
       unsubSuppliers();
       unsubPurInv();
       unsubExpenses();
+      unsubReturns();
+      unsubLedger();
       unsubSettings();
     };
   }, [user, authLoading]);
@@ -990,17 +1034,57 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const collectCustomerDue = async (customerId: string, amountCollected: number) => {
+  const collectCustomerDue = async (
+    customerId: string,
+    amountCollected: number,
+    paymentMethod: PaymentMethod = 'Cash',
+    notes: string = ''
+  ) => {
     if (!user) return;
     const target = customers.find((c) => c.id === customerId);
     if (!target) return;
-    const newDue = Math.max(0, target.totalDue - Math.max(0, Number(amountCollected) || 0));
+    const collected = Math.max(0, Number(amountCollected) || 0);
+    if (collected <= 0) return;
+
+    const newDue = Math.max(0, target.totalDue - collected);
+    const ledgerId = sanitizeDocId(`led_cus_${Date.now()}`);
+    const todayStr = new Date().toISOString().slice(0, 10);
+
     try {
+      // 1. Update customer totalDue
       await updateDoc(doc(db, 'customers', customerId), {
         totalDue: newDue,
         updatedAt: serverTimestamp(),
       });
-      showToast('Customer due payment recorded');
+
+      const newTx: LedgerTransaction = {
+        id: ledgerId,
+        partyId: customerId,
+        partyName: target.name,
+        partyType: 'customer',
+        type: 'DUE_COLLECTION',
+        amount: collected,
+        paymentMethod,
+        date: todayStr,
+        notes: notes.trim().slice(0, 200) || 'Customer due collection',
+        ownerId: user.uid,
+      };
+
+      // Optimistically add to state so UI updates instantly
+      setLedgerTransactions((prev) => [newTx, ...prev.filter((t) => t.id !== ledgerId)]);
+
+      // 2. Persist to Firestore
+      try {
+        await setDoc(doc(db, 'ledgerTransactions', ledgerId), {
+          ...newTx,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } catch (ledgerErr) {
+        console.warn('Could not record customer ledger transaction document:', ledgerErr);
+      }
+
+      showToast(`Collected ৳${collected.toLocaleString()} due from ${target.name}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `customers/${customerId}`);
     }
@@ -1258,6 +1342,27 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
 
       await batch.commit();
       showToast(`Collected due payment on ${invoice.invoiceNumber}`);
+
+      // Record in ledgerTransactions
+      try {
+        const ledgerId = sanitizeDocId(`led_inv_${Date.now()}`);
+        await setDoc(doc(db, 'ledgerTransactions', ledgerId), {
+          partyId: invoice.customerId || 'WALK_IN',
+          partyName: invoice.customerName,
+          partyType: 'customer',
+          type: 'DUE_COLLECTION',
+          amount: add,
+          paymentMethod: method,
+          date: new Date().toISOString().slice(0, 10),
+          invoiceNumber: invoice.invoiceNumber,
+          notes: `Due settlement for invoice ${invoice.invoiceNumber}`,
+          ownerId: user.uid,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } catch (lErr) {
+        console.warn('Could not record invoice ledger transaction document:', lErr);
+      }
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `salesInvoices/${invoice.id}`);
     }
@@ -1314,17 +1419,57 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const paySupplierDue = async (supplierId: string, amountPaid: number) => {
+  const paySupplierDue = async (
+    supplierId: string,
+    amountPaid: number,
+    paymentMethod: PaymentMethod = 'Cash',
+    notes: string = ''
+  ) => {
     if (!user) return;
     const sup = suppliers.find((s) => s.id === supplierId);
     if (!sup) return;
-    const nextPayable = Math.max(0, sup.totalPayable - Math.max(0, Number(amountPaid) || 0));
+    const paid = Math.max(0, Number(amountPaid) || 0);
+    if (paid <= 0) return;
+
+    const nextPayable = Math.max(0, sup.totalPayable - paid);
+    const ledgerId = sanitizeDocId(`led_sup_${Date.now()}`);
+    const todayStr = new Date().toISOString().slice(0, 10);
+
     try {
+      // 1. Update supplier totalPayable
       await updateDoc(doc(db, 'suppliers', supplierId), {
         totalPayable: nextPayable,
         updatedAt: serverTimestamp(),
       });
-      showToast('Supplier payment recorded');
+
+      const newTx: LedgerTransaction = {
+        id: ledgerId,
+        partyId: supplierId,
+        partyName: sup.companyName || sup.name,
+        partyType: 'supplier',
+        type: 'DUE_PAYMENT',
+        amount: paid,
+        paymentMethod,
+        date: todayStr,
+        notes: notes.trim().slice(0, 200) || 'Supplier due payment',
+        ownerId: user.uid,
+      };
+
+      // Optimistically add to state so UI updates instantly
+      setLedgerTransactions((prev) => [newTx, ...prev.filter((t) => t.id !== ledgerId)]);
+
+      // 2. Persist to Firestore
+      try {
+        await setDoc(doc(db, 'ledgerTransactions', ledgerId), {
+          ...newTx,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } catch (ledgerErr) {
+        console.warn('Could not record ledger transaction document:', ledgerErr);
+      }
+
+      showToast(`Paid ৳${paid.toLocaleString()} to ${sup.companyName || sup.name}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `suppliers/${supplierId}`);
     }
@@ -1475,6 +1620,27 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
 
       await batch.commit();
       showToast(`Paid supplier due on ${purchase.invoiceNumber}`);
+
+      // Record in ledgerTransactions
+      try {
+        const ledgerId = sanitizeDocId(`led_pur_${Date.now()}`);
+        await setDoc(doc(db, 'ledgerTransactions', ledgerId), {
+          partyId: purchase.supplierId || 'GENERAL_SUPPLIER',
+          partyName: purchase.supplierName,
+          partyType: 'supplier',
+          type: 'DUE_PAYMENT',
+          amount: add,
+          paymentMethod: method,
+          date: new Date().toISOString().slice(0, 10),
+          invoiceNumber: purchase.invoiceNumber,
+          notes: `Due settlement for purchase invoice ${purchase.invoiceNumber}`,
+          ownerId: user.uid,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } catch (lErr) {
+        console.warn('Could not record purchase ledger transaction document:', lErr);
+      }
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `purchaseInvoices/${purchase.id}`);
     }
@@ -1599,6 +1765,7 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
         purchaseInvoices,
         expenses,
         returns,
+        ledgerTransactions,
         storeSettings,
         toast,
         showToast,
@@ -1606,6 +1773,9 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
         setPrintableReceipt,
         pendingOrderForInvoice,
         setPendingOrderForInvoice,
+        pendingCartProducts,
+        addPendingCartProduct,
+        clearPendingCartProducts,
         signInWithGoogle,
         signInWithEmail,
         signUpWithEmail,

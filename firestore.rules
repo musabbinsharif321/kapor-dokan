@@ -335,7 +335,35 @@ service cloud.firestore {
       data.updatedAt is timestamp;
     }
 
+    // 12. LedgerTransaction Validation Blueprint
+    function isValidLedgerTransaction(data) {
+      return data.keys().hasAll([
+        'partyId', 'partyName', 'partyType', 'type', 'amount',
+        'paymentMethod', 'date', 'ownerId', 'createdAt', 'updatedAt'
+      ]) &&
+      data.partyId is string && data.partyId.size() >= 1 && data.partyId.size() <= 128 &&
+      data.partyName is string && data.partyName.size() >= 1 && data.partyName.size() <= 120 &&
+      (data.partyType == 'customer' || data.partyType == 'supplier') &&
+      (data.type == 'DUE_COLLECTION' || data.type == 'DUE_PAYMENT' || data.type == 'INVOICE_BILL' || data.type == 'RETURN_REFUND') &&
+      data.amount is number && data.amount >= 0 &&
+      isValidPaymentMethod(data.paymentMethod) &&
+      data.date is string && data.date.size() >= 1 && data.date.size() <= 30 &&
+      (!data.keys().hasAny(['notes']) || (data.notes is string && data.notes.size() <= 200)) &&
+      (!data.keys().hasAny(['invoiceNumber']) || (data.invoiceNumber is string && data.invoiceNumber.size() <= 40)) &&
+      isValidId(data.ownerId) && data.ownerId == request.auth.uid &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
     // Collection Match Blocks
+
+    match /ledgerTransactions/{transId} {
+      allow get: if isSignedIn() && isValidId(transId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isVerifiedUser() && isValidId(transId) && isValidLedgerTransaction(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if false;
+      allow delete: if isVerifiedUser() && isValidId(transId) && existing().ownerId == request.auth.uid;
+    }
 
     match /returns/{returnId} {
       allow get: if isSignedIn() && isValidId(returnId) && existing().ownerId == request.auth.uid;

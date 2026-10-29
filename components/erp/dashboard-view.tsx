@@ -33,6 +33,8 @@ export function DashboardView() {
     salesInvoices,
     suppliers,
     expenses,
+    purchaseInvoices,
+    ledgerTransactions,
     storeSettings,
     setActiveModule,
     setSelectedCategoryFilter,
@@ -48,6 +50,22 @@ export function DashboardView() {
   const todaySalesInvoices = salesInvoices.filter((inv) => inv.invoiceDate === today);
   const todaySales = todaySalesInvoices.reduce((acc, inv) => acc + inv.grandTotal, 0);
   const todayCollected = todaySalesInvoices.reduce((acc, inv) => acc + inv.paidAmount, 0);
+
+  // Cash in Counter Drawer calculation
+  // (Cash Sales + Cash Due Collections - Cash Daily Expenses)
+  const cashSales = salesInvoices.filter((i) => i.paymentMethod === 'Cash').reduce((a, i) => a + i.paidAmount, 0);
+  const cashExpenses = expenses.filter((e) => e.paymentMethod === 'Cash').reduce((a, e) => a + e.amount, 0);
+  const cashCustomerCollections = ledgerTransactions
+    .filter((t) => t.type === 'CUSTOMER_DUE_COLLECTION' && t.paymentMethod === 'Cash')
+    .reduce((a, t) => a + t.amount, 0);
+  const cashInDrawer = Math.max(
+    0,
+    cashSales + cashCustomerCollections - cashExpenses
+  );
+
+  const todayCashSales = todaySalesInvoices
+    .filter((inv) => inv.paymentMethod === 'Cash')
+    .reduce((acc, inv) => acc + inv.paidAmount, 0);
 
   const totalSalesRevenue = salesInvoices.reduce((acc, inv) => acc + inv.grandTotal, 0);
   const totalCOGS = salesInvoices.reduce((acc, inv) => acc + (inv.totalCost || 0), 0);
@@ -196,23 +214,29 @@ export function DashboardView() {
           </div>
 
           {/* Sub-Stats Glass Pill Grid */}
-          <div className="grid grid-cols-3 gap-2 p-2.5 rounded-2xl bg-white/10 backdrop-blur-md border border-white/10 text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-2.5 rounded-2xl bg-white/10 backdrop-blur-md border border-white/10 text-xs">
             <div>
-              <span className="text-[10px] text-slate-400 block">Cash Collected</span>
-              <span className="font-bold text-emerald-400 font-mono tabular-nums mt-0.5 block truncate">
+              <span className="text-[10px] text-emerald-300 block font-medium">Cash in Drawer (ক্যাশ)</span>
+              <span className="font-bold text-emerald-400 font-mono tabular-nums mt-0.5 block truncate text-xs sm:text-sm">
+                {formatBDT(cashInDrawer, sym)}
+              </span>
+            </div>
+            <div>
+              <span className="text-[10px] text-slate-300 block font-medium">Today Collected</span>
+              <span className="font-bold text-white font-mono tabular-nums mt-0.5 block truncate text-xs sm:text-sm">
                 {formatBDT(todayCollected, sym)}
               </span>
             </div>
             <div>
-              <span className="text-[10px] text-slate-400 block">Today Expense</span>
-              <span className="font-bold text-amber-300 font-mono tabular-nums mt-0.5 block truncate">
+              <span className="text-[10px] text-amber-300 block font-medium">Today Expense</span>
+              <span className="font-bold text-amber-300 font-mono tabular-nums mt-0.5 block truncate text-xs sm:text-sm">
                 {formatBDT(todayExpenses, sym)}
               </span>
             </div>
             <div>
-              <span className="text-[10px] text-slate-400 block">Net Profit</span>
+              <span className="text-[10px] text-slate-300 block font-medium">Net Profit</span>
               <span
-                className={`font-bold font-mono tabular-nums mt-0.5 block truncate ${
+                className={`font-bold font-mono tabular-nums mt-0.5 block truncate text-xs sm:text-sm ${
                   netProfit >= 0 ? 'text-emerald-400' : 'text-red-400'
                 }`}
               >

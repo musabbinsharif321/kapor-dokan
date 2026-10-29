@@ -14,6 +14,9 @@ import {
   Minus,
   Camera,
   QrCode,
+  ChevronLeft,
+  ChevronRight,
+  Filter,
 } from 'lucide-react';
 import { useErp, CartLineItem } from '@/context/erp-context';
 import { QrCameraScannerModal } from './qr-camera-scanner-modal';
@@ -39,10 +42,15 @@ export function SupplierView() {
   } = useErp();
 
   const [search, setSearch] = useState('');
+  const [payableFilter, setPayableFilter] = useState<'ALL' | 'PAYABLE' | 'CLEAR'>('ALL');
+  const [supplierPage, setSupplierPage] = useState(1);
+  const supplierPageSize = 8;
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [payTarget, setPayTarget] = useState<Supplier | null>(null);
   const [payAmount, setPayAmount] = useState('');
+  const [payMethod, setPayMethod] = useState<PaymentMethod>('Cash');
+  const [payNotes, setPayNotes] = useState('');
   const [ledgerSupplier, setLedgerSupplier] = useState<Supplier | null>(null);
 
   const [name, setName] = useState('');
@@ -94,20 +102,39 @@ export function SupplierView() {
   const handlePayDue = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!payTarget) return;
-    await paySupplierDue(payTarget.id, Number(payAmount) || 0);
+    await paySupplierDue(
+      payTarget.id,
+      Number(payAmount) || 0,
+      payMethod,
+      payNotes
+    );
     setPayTarget(null);
     setPayAmount('');
+    setPayMethod('Cash');
+    setPayNotes('');
   };
 
   const filtered = suppliers.filter((s) => {
+    const matchesPayable =
+      payableFilter === 'ALL'
+        ? true
+        : payableFilter === 'PAYABLE'
+        ? s.totalPayable > 0
+        : s.totalPayable === 0;
     const q = search.trim().toLowerCase();
-    return (
+    const matchesSearch =
       !q ||
       s.companyName.toLowerCase().includes(q) ||
       s.name.toLowerCase().includes(q) ||
-      s.phone.toLowerCase().includes(q)
-    );
+      s.phone.toLowerCase().includes(q);
+    return matchesPayable && matchesSearch;
   });
+
+  const totalSupplierPages = Math.max(1, Math.ceil(filtered.length / supplierPageSize));
+  const pagedSuppliers = filtered.slice(
+    (supplierPage - 1) * supplierPageSize,
+    supplierPage * supplierPageSize
+  );
 
   const totalPayableSum = suppliers.reduce((acc, s) => acc + s.totalPayable, 0);
 
@@ -132,21 +159,66 @@ export function SupplierView() {
         </button>
       </div>
 
-      <div className="relative">
-        <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search supplier company, contact person, or phone..."
-          className="w-full min-h-[44px] pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-base sm:text-sm"
-        />
+      {/* Search and Payable Filter Controls (Mobile Touch Friendly) */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setSupplierPage(1);
+            }}
+            placeholder="Search supplier company, contact person, or phone..."
+            className="w-full min-h-[44px] pl-10 pr-9 py-2 bg-white border border-slate-200 rounded-xl text-base sm:text-sm focus:border-blue-600 transition-colors"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch('');
+                setSupplierPage(1);
+              }}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar shrink-0">
+          {(
+            [
+              { id: 'ALL', label: 'All Suppliers' },
+              { id: 'PAYABLE', label: 'Has Payable Due' },
+              { id: 'CLEAR', label: 'Settled Accounts' },
+            ] as const
+          ).map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => {
+                setPayableFilter(item.id);
+                setSupplierPage(1);
+              }}
+              className={`min-h-[40px] px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
+                payableFilter === item.id
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {filtered.length === 0 ? (
+      {pagedSuppliers.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center space-y-3">
           <Building2 className="w-8 h-8 text-slate-400 mx-auto" />
           <p className="text-sm font-bold text-slate-900">No Suppliers Found</p>
+          <p className="text-xs text-slate-400">Try changing your search term or payable status</p>
           <button
             onClick={openAdd}
             className="min-h-[42px] px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold"
@@ -155,94 +227,129 @@ export function SupplierView() {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-          {filtered.map((s) => (
-            <div
-              key={s.id}
-              className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 flex flex-col justify-between gap-4"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="font-bold text-sm sm:text-base text-slate-900 truncate">
-                    {s.companyName}
-                  </p>
-                  <p className="text-xs text-slate-600 mt-0.5">Contact: {s.name}</p>
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mt-1">
-                    <span className="font-mono">{s.phone}</span>
-                    {s.address && (
-                      <>
-                        <span aria-hidden="true">·</span>
-                        <span>{s.address}</span>
-                      </>
-                    )}
+        <div className="space-y-3.5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+            {pagedSuppliers.map((s) => (
+              <div
+                key={s.id}
+                className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 flex flex-col justify-between gap-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-bold text-sm sm:text-base text-slate-900 truncate">
+                      {s.companyName}
+                    </p>
+                    <p className="text-xs text-slate-600 mt-0.5">Contact: {s.name}</p>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mt-1">
+                      <span className="font-mono">{s.phone}</span>
+                      {s.address && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span>{s.address}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="text-right font-mono tabular-nums shrink-0">
+                    <p
+                      className={`text-sm font-bold ${
+                        s.totalPayable > 0 ? 'text-red-600' : 'text-emerald-600'
+                      }`}
+                    >
+                      {s.totalPayable > 0
+                        ? `Payable: ${formatBDT(s.totalPayable, sym)}`
+                        : 'Settled'}
+                    </p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Purchased: {formatBDT(s.totalPurchased, sym)}
+                    </p>
                   </div>
                 </div>
 
-                <div className="text-right font-mono tabular-nums shrink-0">
-                  <p
-                    className={`text-sm font-bold ${
-                      s.totalPayable > 0 ? 'text-red-600' : 'text-emerald-600'
-                    }`}
-                  >
-                    {s.totalPayable > 0
-                      ? `Payable: ${formatBDT(s.totalPayable, sym)}`
-                      : 'Settled'}
-                  </p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Purchased: {formatBDT(s.totalPurchased, sym)}
-                  </p>
+                <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2.5">
+                  {s.totalPayable > 0 ? (
+                    <button
+                      onClick={() => {
+                        setPayTarget(s);
+                        setPayAmount(String(s.totalPayable));
+                      }}
+                      className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-xs"
+                    >
+                      Pay Supplier Due
+                    </button>
+                  ) : (
+                    <span className="text-xs text-emerald-700 font-medium">
+                      No Payable Due
+                    </span>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      onClick={() => setLedgerSupplier(s)}
+                      className="min-h-[40px] px-3 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-1.5 hover:bg-slate-50 cursor-pointer"
+                    >
+                      <ClipboardList className="w-3.5 h-3.5" />
+                      <span>Ledger</span>
+                    </button>
+                    <a
+                      href={`tel:${s.phone}`}
+                      className="min-h-[40px] px-3 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-1.5 hover:bg-slate-50"
+                    >
+                      <Phone className="w-3.5 h-3.5" />
+                      <span>Call</span>
+                    </a>
+                    <button
+                      onClick={() => openEdit(s)}
+                      className="min-h-[40px] px-3 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-1.5 hover:bg-slate-50"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>Edit</span>
+                    </button>
+                    <button
+                      onClick={() => deleteSupplier(s.id)}
+                      className="min-h-[40px] min-w-[40px] rounded-xl border border-slate-200 text-slate-400 hover:text-red-600 flex items-center justify-center"
+                      title="Delete Supplier"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
+            ))}
+          </div>
 
-              <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2.5">
-                {s.totalPayable > 0 ? (
-                  <button
-                    onClick={() => {
-                      setPayTarget(s);
-                      setPayAmount(String(s.totalPayable));
-                    }}
-                    className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-xs"
-                  >
-                    Pay Supplier Due
-                  </button>
-                ) : (
-                  <span className="text-xs text-emerald-700 font-medium">
-                    No Payable Due
-                  </span>
-                )}
-
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <button
-                    onClick={() => setLedgerSupplier(s)}
-                    className="min-h-[40px] px-3 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-1.5 hover:bg-slate-50"
-                  >
-                    <ClipboardList className="w-3.5 h-3.5" />
-                    <span>Ledger</span>
-                  </button>
-                  <a
-                    href={`tel:${s.phone}`}
-                    className="min-h-[40px] px-3 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-1.5 hover:bg-slate-50"
-                  >
-                    <Phone className="w-3.5 h-3.5" />
-                    <span>Call</span>
-                  </a>
-                  <button
-                    onClick={() => openEdit(s)}
-                    className="min-h-[40px] px-3 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-1.5 hover:bg-slate-50"
-                  >
-                    <Edit3 className="w-3.5 h-3.5" />
-                    <span>Edit</span>
-                  </button>
-                  <button
-                    onClick={() => deleteSupplier(s.id)}
-                    className="min-h-[40px] min-w-[40px] rounded-xl border border-slate-200 text-slate-400 hover:text-red-600 flex items-center justify-center"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+          {/* Mobile-Friendly Pagination Controls */}
+          {totalSupplierPages > 1 && (
+            <div className="bg-white rounded-2xl border border-slate-200 p-3.5 flex items-center justify-between gap-2 text-xs">
+              <span className="text-slate-500 font-mono">
+                Page {supplierPage} of {totalSupplierPages} ({filtered.length} suppliers)
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={supplierPage <= 1}
+                  onClick={() => setSupplierPage((p) => Math.max(1, p - 1))}
+                  className="min-h-[38px] min-w-[38px] px-3 rounded-xl border border-slate-200 bg-white font-semibold text-slate-700 disabled:opacity-40 flex items-center justify-center gap-1"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  <span className="hidden sm:inline">Prev</span>
+                </button>
+                <div className="px-2 font-mono font-bold text-slate-800">
+                  {supplierPage} / {totalSupplierPages}
                 </div>
+                <button
+                  type="button"
+                  disabled={supplierPage >= totalSupplierPages}
+                  onClick={() => setSupplierPage((p) => Math.min(totalSupplierPages, p + 1))}
+                  className="min-h-[38px] min-w-[38px] px-3 rounded-xl border border-slate-200 bg-white font-semibold text-slate-700 disabled:opacity-40 flex items-center justify-center gap-1"
+                >
+                  <span className="hidden sm:inline">Next</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
               </div>
             </div>
-          ))}
+          )}
         </div>
       )}
 
@@ -379,18 +486,48 @@ export function SupplierView() {
               </p>
             </div>
             <div className="p-5 space-y-3">
-              <label className="block text-xs font-semibold text-slate-700">
-                Payment Amount ({sym}) *
-              </label>
-              <input
-                type="number"
-                min="1"
-                max={payTarget.totalPayable}
-                required
-                value={payAmount}
-                onChange={(e) => setPayAmount(e.target.value)}
-                className="w-full min-h-[46px] px-3.5 py-2 rounded-xl border border-slate-200 text-base font-mono tabular-nums"
-              />
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Payment Amount ({sym}) *
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max={payTarget.totalPayable}
+                  required
+                  value={payAmount}
+                  onChange={(e) => setPayAmount(e.target.value)}
+                  className="w-full min-h-[46px] px-3.5 py-2 rounded-xl border border-slate-200 text-base font-mono tabular-nums"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Payment Method
+                </label>
+                <select
+                  value={payMethod}
+                  onChange={(e) => setPayMethod(e.target.value as PaymentMethod)}
+                  className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 text-sm bg-white"
+                >
+                  {PAYMENT_METHODS.map((pm) => (
+                    <option key={pm} value={pm}>{pm}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Note / Reference (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Paid via Bank transfer / Cash"
+                  value={payNotes}
+                  onChange={(e) => setPayNotes(e.target.value)}
+                  className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 text-sm"
+                />
+              </div>
             </div>
             <div className="p-4 bg-slate-50 border-t border-slate-200 flex gap-3">
               <button
@@ -429,7 +566,8 @@ function SupplierLedgerModal({
   supplier: Supplier;
   onClose: () => void;
 }) {
-  const { purchaseInvoices, storeSettings, setPrintableReceipt } = useErp();
+  const { purchaseInvoices, ledgerTransactions, storeSettings, setPrintableReceipt } = useErp();
+  const [activeLedgerTab, setActiveLedgerTab] = useState<'all' | 'invoices' | 'payments'>('all');
   const sym = storeSettings.currencySymbol || '৳';
 
   const supplierInvoices = purchaseInvoices.filter(
@@ -439,9 +577,74 @@ function SupplierLedgerModal({
       inv.supplierName.toLowerCase() === supplier.name.toLowerCase()
   );
 
+  const supplierPayments = ledgerTransactions.filter(
+    (tx) =>
+      tx.partyId === supplier.id ||
+      (tx.partyType === 'supplier' &&
+        (tx.partyName.toLowerCase() === supplier.companyName.toLowerCase() ||
+          tx.partyName.toLowerCase() === supplier.name.toLowerCase()))
+  );
+
+  interface SupplierLedgerItem {
+    id: string;
+    date: string;
+    type: 'INVOICE' | 'PAYMENT';
+    title: string;
+    subtitle?: string;
+    details?: string;
+    debit?: number; // Invoiced wholesale amount (payable increases)
+    credit?: number; // Paid amount to supplier (payable decreases)
+    paymentMethod?: string;
+    statusBadge?: string;
+    statusColor?: string;
+    rawInvoice?: typeof supplierInvoices[0];
+  }
+
+  const combinedLedger: SupplierLedgerItem[] = [
+    ...supplierInvoices.map((inv): SupplierLedgerItem => ({
+      id: inv.id,
+      date: inv.purchaseDate,
+      type: 'INVOICE',
+      title: `Purchase ${inv.invoiceNumber}`,
+      subtitle: `${inv.itemsCount} pcs`,
+      details: inv.itemsSummary,
+      debit: inv.totalAmount,
+      credit: inv.paidAmount,
+      paymentMethod: inv.paymentMethod,
+      statusBadge: inv.status,
+      statusColor:
+        inv.status === 'Paid'
+          ? 'bg-emerald-100 text-emerald-800'
+          : inv.status === 'Partial'
+          ? 'bg-amber-100 text-amber-800'
+          : 'bg-red-100 text-red-800',
+      rawInvoice: inv,
+    })),
+    ...supplierPayments.map((p): SupplierLedgerItem => ({
+      id: p.id,
+      date: p.date,
+      type: 'PAYMENT',
+      title: `Due Payment Sent`,
+      subtitle: p.notes || (p.invoiceNumber ? `Ref: ${p.invoiceNumber}` : 'Supplier Due Settlement'),
+      credit: p.amount,
+      paymentMethod: p.paymentMethod,
+      statusBadge: 'Paid',
+      statusColor: 'bg-emerald-100 text-emerald-800',
+    })),
+  ].sort((a, b) => b.date.localeCompare(a.date));
+
   const totalPurchased = supplierInvoices.reduce((acc, i) => acc + i.totalAmount, 0);
-  const totalPaid = supplierInvoices.reduce((acc, i) => acc + i.paidAmount, 0);
+  const totalPaidDirect = supplierInvoices.reduce((acc, i) => acc + i.paidAmount, 0);
+  const totalPaidDues = supplierPayments.reduce((acc, p) => acc + p.amount, 0);
+  const totalPaid = totalPaidDirect + totalPaidDues;
   const currentPayable = supplier.totalPayable;
+
+  const displayItems =
+    activeLedgerTab === 'invoices'
+      ? combinedLedger.filter((item) => item.type === 'INVOICE')
+      : activeLedgerTab === 'payments'
+      ? combinedLedger.filter((item) => item.type === 'PAYMENT')
+      : combinedLedger;
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
@@ -490,79 +693,141 @@ function SupplierLedgerModal({
           </div>
         </div>
 
-        {/* Invoices List */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-3">
-          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-            Purchase Invoices & Stock Restock History ({supplierInvoices.length} invoices)
-          </h4>
+        {/* Sub-Tabs: All / Invoices / Payments */}
+        <div className="px-5 pt-3 pb-0 flex items-center gap-2 border-b border-slate-200 bg-white">
+          <button
+            onClick={() => setActiveLedgerTab('all')}
+            className={`pb-2.5 px-2 text-xs font-semibold border-b-2 transition-colors ${
+              activeLedgerTab === 'all'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            All Activity ({combinedLedger.length})
+          </button>
+          <button
+            onClick={() => setActiveLedgerTab('invoices')}
+            className={`pb-2.5 px-2 text-xs font-semibold border-b-2 transition-colors ${
+              activeLedgerTab === 'invoices'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            Purchase Invoices ({supplierInvoices.length})
+          </button>
+          <button
+            onClick={() => setActiveLedgerTab('payments')}
+            className={`pb-2.5 px-2 text-xs font-semibold border-b-2 transition-colors ${
+              activeLedgerTab === 'payments'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            Payments Sent ({supplierPayments.length})
+          </button>
+        </div>
 
-          {supplierInvoices.length === 0 ? (
+        {/* Ledger Items List */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-3">
+          {displayItems.length === 0 ? (
             <div className="py-12 text-center space-y-2">
               <Building2 className="w-8 h-8 text-slate-300 mx-auto" />
-              <p className="text-sm font-medium text-slate-700">No purchase invoices found for this supplier.</p>
-              <p className="text-xs text-slate-400">Invoices created during Stock Purchase will appear here automatically.</p>
+              <p className="text-sm font-medium text-slate-700">No records found for this supplier.</p>
+              <p className="text-xs text-slate-400">Invoices and due payments will appear here automatically.</p>
             </div>
           ) : (
-            supplierInvoices.map((inv) => (
+            displayItems.map((item) => (
               <div
-                key={inv.id}
-                className="bg-white rounded-xl border border-slate-200 p-4 space-y-3 hover:border-slate-300 transition-colors"
+                key={item.id}
+                className={`bg-white rounded-xl border p-4 space-y-3 transition-colors ${
+                  item.type === 'PAYMENT'
+                    ? 'border-emerald-200 bg-emerald-50/20'
+                    : 'border-slate-200 hover:border-slate-300'
+                }`}
               >
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold font-mono text-slate-900">{inv.invoiceNumber}</span>
+                    <span className="font-bold font-mono text-slate-900">{item.title}</span>
                     <span className="text-slate-400">·</span>
-                    <span className="text-slate-600 font-mono">{inv.purchaseDate}</span>
+                    <span className="text-slate-600 font-mono">{item.date}</span>
+                    {item.paymentMethod && (
+                      <>
+                        <span className="text-slate-400">·</span>
+                        <span className="text-slate-500 font-medium">Via {item.paymentMethod}</span>
+                      </>
+                    )}
                   </div>
-                  <span
-                    className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${
-                      inv.status === 'Paid'
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : inv.status === 'Partial'
-                        ? 'bg-amber-100 text-amber-800'
-                        : 'bg-red-100 text-red-800'
-                    }`}
-                  >
-                    {inv.status}
-                  </span>
+                  {item.statusBadge && (
+                    <span
+                      className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${
+                        item.statusColor || 'bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      {item.statusBadge}
+                    </span>
+                  )}
                 </div>
 
-                <div className="text-xs text-slate-700 bg-slate-50 p-2.5 rounded-lg font-mono">
-                  <p className="font-semibold text-slate-900">{inv.itemsSummary}</p>
-                  <p className="text-[11px] text-slate-500 mt-0.5">Total Units: {inv.itemsCount} pcs</p>
-                </div>
+                {item.details && (
+                  <div className="text-xs text-slate-700 bg-slate-50 p-2.5 rounded-lg font-mono">
+                    <p className="font-semibold text-slate-900">{item.details}</p>
+                    {item.subtitle && (
+                      <p className="text-[11px] text-slate-500 mt-0.5">{item.subtitle}</p>
+                    )}
+                  </div>
+                )}
 
-                <div className="flex items-center justify-between pt-2 border-t border-slate-100 font-mono tabular-nums text-xs">
-                  <div className="space-x-3 text-slate-600">
-                    <span>Total: <strong className="text-slate-900">{formatBDT(inv.totalAmount, sym)}</strong></span>
-                    <span>Paid: <strong className="text-emerald-600">{formatBDT(inv.paidAmount, sym)}</strong></span>
-                    <span>Due: <strong className="text-red-600">{formatBDT(inv.dueAmount, sym)}</strong></span>
+                {!item.details && item.subtitle && (
+                  <p className="text-xs text-slate-600 italic bg-white/60 p-2 rounded border border-slate-100">
+                    {item.subtitle}
+                  </p>
+                )}
+
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-2 border-t border-slate-100 font-mono tabular-nums text-xs">
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-slate-600">
+                    {item.debit !== undefined && (
+                      <span>
+                        Purchased: <strong className="text-slate-900">{formatBDT(item.debit, sym)}</strong>
+                      </span>
+                    )}
+                    {item.credit !== undefined && (
+                      <span>
+                        Paid: <strong className="text-emerald-600">{formatBDT(item.credit, sym)}</strong>
+                      </span>
+                    )}
+                    {item.rawInvoice && item.rawInvoice.dueAmount > 0 && (
+                      <span>
+                        Due: <strong className="text-red-600">{formatBDT(item.rawInvoice.dueAmount, sym)}</strong>
+                      </span>
+                    )}
                   </div>
 
-                  <button
-                    onClick={() => {
-                      setPrintableReceipt({
-                        type: 'PURCHASE',
-                        invoiceNumber: inv.invoiceNumber,
-                        date: inv.purchaseDate,
-                        partyName: inv.supplierName,
-                        partyPhone: supplier.phone,
-                        itemsSummary: inv.itemsSummary,
-                        itemsCount: inv.itemsCount,
-                        subtotal: inv.totalAmount,
-                        discount: 0,
-                        grandTotal: inv.totalAmount,
-                        paidAmount: inv.paidAmount,
-                        dueAmount: inv.dueAmount,
-                        paymentMethod: inv.paymentMethod,
-                        status: inv.status,
-                      });
-                    }}
-                    className="min-h-[36px] px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 font-semibold text-slate-700 flex items-center gap-1.5"
-                  >
-                    <Printer className="w-3.5 h-3.5" />
-                    <span>Print Invoice</span>
-                  </button>
+                  {item.rawInvoice && (
+                    <button
+                      onClick={() => {
+                        setPrintableReceipt({
+                          type: 'PURCHASE',
+                          invoiceNumber: item.rawInvoice!.invoiceNumber,
+                          date: item.rawInvoice!.purchaseDate,
+                          partyName: item.rawInvoice!.supplierName,
+                          partyPhone: supplier.phone,
+                          itemsSummary: item.rawInvoice!.itemsSummary,
+                          itemsCount: item.rawInvoice!.itemsCount,
+                          subtotal: item.rawInvoice!.totalAmount,
+                          discount: 0,
+                          grandTotal: item.rawInvoice!.totalAmount,
+                          paidAmount: item.rawInvoice!.paidAmount,
+                          dueAmount: item.rawInvoice!.dueAmount,
+                          paymentMethod: item.rawInvoice!.paymentMethod,
+                          status: item.rawInvoice!.status,
+                        });
+                      }}
+                      className="min-h-[36px] px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 font-semibold text-slate-700 flex items-center gap-1.5"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      <span>Print Invoice</span>
+                    </button>
+                  )}
                 </div>
               </div>
             ))
@@ -613,6 +878,12 @@ export function PurchaseInvoiceView() {
   const [settleAmount, setSettleAmount] = useState('');
   const [settleMethod, setSettleMethod] = useState<PaymentMethod>('Cash');
   const [cameraScannerOpen, setCameraScannerOpen] = useState(false);
+
+  // Purchase Invoices Filter & Pagination States
+  const [purchaseSearch, setPurchaseSearch] = useState('');
+  const [purchaseStatusFilter, setPurchaseStatusFilter] = useState<'ALL' | 'Paid' | 'Partial' | 'Due'>('ALL');
+  const [purchasePage, setPurchasePage] = useState(1);
+  const purchasePageSize = 8;
 
   const sym = storeSettings.currencySymbol || '৳';
   const effectiveSupplierId = supplierId || suppliers[0]?.id || 'GENERAL_SUPPLIER';
@@ -693,6 +964,24 @@ export function PurchaseInvoiceView() {
 
   const filteredProducts = products.filter(
     (p) => catFilter === 'All' || p.category === catFilter
+  );
+
+  const filteredPurchases = purchaseInvoices.filter((pur) => {
+    const matchesStatus =
+      purchaseStatusFilter === 'ALL' || pur.status === purchaseStatusFilter;
+    const q = purchaseSearch.trim().toLowerCase();
+    const matchesSearch =
+      !q ||
+      pur.invoiceNumber.toLowerCase().includes(q) ||
+      pur.supplierName.toLowerCase().includes(q) ||
+      pur.itemsSummary.toLowerCase().includes(q);
+    return matchesStatus && matchesSearch;
+  });
+
+  const totalPurchasePages = Math.max(1, Math.ceil(filteredPurchases.length / purchasePageSize));
+  const pagedPurchases = filteredPurchases.slice(
+    (purchasePage - 1) * purchasePageSize,
+    purchasePage * purchasePageSize
   );
 
   return (
@@ -915,94 +1204,200 @@ export function PurchaseInvoiceView() {
 
       {/* Purchase Invoices History */}
       <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6 space-y-4">
-        <h3 className="text-base font-bold text-slate-900">
-          Purchase Invoices History ({purchaseInvoices.length})
-        </h3>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base font-bold text-slate-900">
+              Purchase Invoices History ({filteredPurchases.length})
+            </h3>
+            <p className="text-xs text-slate-500">
+              Review factory restock invoices, filter by status or pay supplier dues
+            </p>
+          </div>
 
-        <div className="space-y-3">
-          {purchaseInvoices.map((pur) => (
-            <div
-              key={pur.id}
-              className="p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-            >
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="font-mono font-bold text-slate-900">
-                    {pur.invoiceNumber}
-                  </span>
-                  <span aria-hidden="true">·</span>
-                  <span className="font-bold text-slate-900 text-sm">
-                    {pur.supplierName}
-                  </span>
-                  <span aria-hidden="true">·</span>
-                  <span className="font-mono text-slate-500">{pur.purchaseDate}</span>
-                </div>
-                <p className="text-xs text-slate-600 mt-1">{pur.itemsSummary}</p>
-                <div className="flex flex-wrap items-center gap-2 text-xs font-mono tabular-nums mt-1.5">
-                  <span>
-                    Total: <strong>{formatBDT(pur.totalAmount, sym)}</strong>
-                  </span>
-                  <span aria-hidden="true">·</span>
-                  <span className="text-emerald-700">
-                    Paid: {formatBDT(pur.paidAmount, sym)}
-                  </span>
-                  {pur.dueAmount > 0 && (
-                    <>
-                      <span aria-hidden="true">·</span>
-                      <span className="text-red-600 font-bold">
-                        Payable Due: {formatBDT(pur.dueAmount, sym)}
-                      </span>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                {pur.dueAmount > 0 && pur.status !== 'Paid' && (
-                  <button
-                    onClick={() => {
-                      setSettleTarget(pur);
-                      setSettleAmount(String(pur.dueAmount));
-                    }}
-                    className="min-h-[40px] px-3 py-1.5 rounded-xl bg-slate-900 text-white text-xs font-semibold"
-                  >
-                    Pay Due
-                  </button>
-                )}
+          {/* Quick Search & Status Filter (Mobile-friendly) */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            <div className="relative flex-1 sm:w-56">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Search invoice, supplier, item..."
+                value={purchaseSearch}
+                onChange={(e) => {
+                  setPurchaseSearch(e.target.value);
+                  setPurchasePage(1);
+                }}
+                className="w-full min-h-[40px] pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:border-blue-500 transition-colors"
+              />
+              {purchaseSearch && (
                 <button
-                  onClick={() =>
-                    setPrintableReceipt({
-                      type: 'PURCHASE',
-                      invoiceNumber: pur.invoiceNumber,
-                      date: pur.purchaseDate,
-                      partyName: pur.supplierName,
-                      partyPhone: '',
-                      itemsSummary: pur.itemsSummary,
-                      itemsCount: pur.itemsCount,
-                      subtotal: pur.totalAmount,
-                      discount: 0,
-                      grandTotal: pur.totalAmount,
-                      paidAmount: pur.paidAmount,
-                      dueAmount: pur.dueAmount,
-                      paymentMethod: pur.paymentMethod,
-                      status: pur.status,
-                    })
-                  }
-                  className="min-h-[40px] px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-1.5 hover:bg-slate-50"
+                  type="button"
+                  onClick={() => {
+                    setPurchaseSearch('');
+                    setPurchasePage(1);
+                  }}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
                 >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>Voucher</span>
+                  <X className="w-3.5 h-3.5" />
                 </button>
-                <button
-                  onClick={() => deletePurchaseInvoice(pur.id)}
-                  className="min-h-[40px] min-w-[40px] rounded-xl border border-slate-200 text-slate-400 hover:text-red-600 flex items-center justify-center"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
+              )}
             </div>
-          ))}
+
+            <div className="flex items-center gap-1 overflow-x-auto pb-0.5 no-scrollbar">
+              {(['ALL', 'Paid', 'Partial', 'Due'] as const).map((st) => (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() => {
+                    setPurchaseStatusFilter(st);
+                    setPurchasePage(1);
+                  }}
+                  className={`min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
+                    purchaseStatusFilter === st
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {st === 'ALL' ? 'All' : st}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
+
+        {pagedPurchases.length === 0 ? (
+          <div className="py-12 text-center text-xs text-slate-400 bg-slate-50 rounded-xl">
+            No purchase invoices match your filter
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {pagedPurchases.map((pur) => (
+              <div
+                key={pur.id}
+                className="p-3.5 sm:p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white hover:border-slate-300 transition-colors"
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="font-mono font-bold text-slate-900">
+                      {pur.invoiceNumber}
+                    </span>
+                    <span aria-hidden="true" className="text-slate-300">·</span>
+                    <span className="font-bold text-slate-900 text-sm truncate">
+                      {pur.supplierName}
+                    </span>
+                    <span aria-hidden="true" className="text-slate-300">·</span>
+                    <span className="font-mono text-slate-500">{pur.purchaseDate}</span>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        pur.status === 'Paid'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : pur.status === 'Partial'
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-red-100 text-red-800'
+                      }`}
+                    >
+                      {pur.status}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 mt-1 line-clamp-1">{pur.itemsSummary}</p>
+                  <div className="flex flex-wrap items-center gap-2 text-xs font-mono tabular-nums mt-1.5">
+                    <span>
+                      Total: <strong>{formatBDT(pur.totalAmount, sym)}</strong>
+                    </span>
+                    <span aria-hidden="true" className="text-slate-300">·</span>
+                    <span className="text-emerald-700 font-semibold">
+                      Paid: {formatBDT(pur.paidAmount, sym)}
+                    </span>
+                    {pur.dueAmount > 0 && (
+                      <>
+                        <span aria-hidden="true" className="text-slate-300">·</span>
+                        <span className="text-red-600 font-bold">
+                          Payable Due: {formatBDT(pur.dueAmount, sym)}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 self-end sm:self-center">
+                  {pur.dueAmount > 0 && pur.status !== 'Paid' && (
+                    <button
+                      onClick={() => {
+                        setSettleTarget(pur);
+                        setSettleAmount(String(pur.dueAmount));
+                      }}
+                      className="min-h-[38px] px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-xs"
+                    >
+                      Pay Due
+                    </button>
+                  )}
+                  <button
+                    onClick={() =>
+                      setPrintableReceipt({
+                        type: 'PURCHASE',
+                        invoiceNumber: pur.invoiceNumber,
+                        date: pur.purchaseDate,
+                        partyName: pur.supplierName,
+                        partyPhone: '',
+                        itemsSummary: pur.itemsSummary,
+                        itemsCount: pur.itemsCount,
+                        subtotal: pur.totalAmount,
+                        discount: 0,
+                        grandTotal: pur.totalAmount,
+                        paidAmount: pur.paidAmount,
+                        dueAmount: pur.dueAmount,
+                        paymentMethod: pur.paymentMethod,
+                        status: pur.status,
+                      })
+                    }
+                    className="min-h-[38px] px-2.5 sm:px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-1 hover:bg-slate-50 cursor-pointer"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Voucher</span>
+                  </button>
+                  <button
+                    onClick={() => deletePurchaseInvoice(pur.id)}
+                    className="min-h-[38px] min-w-[38px] rounded-xl border border-slate-200 text-slate-400 hover:text-red-600 flex items-center justify-center"
+                    title="Delete Invoice"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Mobile-Friendly Pagination Controls */}
+        {totalPurchasePages > 1 && (
+          <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 text-xs">
+            <span className="text-slate-500 font-mono">
+              Page {purchasePage} of {totalPurchasePages} ({filteredPurchases.length} invoices)
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={purchasePage <= 1}
+                onClick={() => setPurchasePage((p) => Math.max(1, p - 1))}
+                className="min-h-[38px] min-w-[38px] px-3 rounded-xl border border-slate-200 bg-white font-semibold text-slate-700 disabled:opacity-40 flex items-center justify-center gap-1"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                <span className="hidden sm:inline">Prev</span>
+              </button>
+              <div className="px-2 font-mono font-bold text-slate-800">
+                {purchasePage} / {totalPurchasePages}
+              </div>
+              <button
+                type="button"
+                disabled={purchasePage >= totalPurchasePages}
+                onClick={() => setPurchasePage((p) => Math.min(totalPurchasePages, p + 1))}
+                className="min-h-[38px] min-w-[38px] px-3 rounded-xl border border-slate-200 bg-white font-semibold text-slate-700 disabled:opacity-40 flex items-center justify-center gap-1"
+              >
+                <span className="hidden sm:inline">Next</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Settle Purchase Due Modal */}

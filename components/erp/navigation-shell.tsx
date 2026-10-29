@@ -88,6 +88,209 @@ export function NavigationShell({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const handlePrintReceipt = () => {
+    if (!printableReceipt) return;
+    const printSym = storeSettings.currencySymbol || '৳';
+    const printWindow = window.open('', '_blank', 'width=380,height=600');
+    if (!printWindow) {
+      window.print();
+      return;
+    }
+
+    const items = printableReceipt.itemsSummary.split(' · ');
+
+    printWindow.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Receipt ${printableReceipt.invoiceNumber} - ${storeSettings.storeName}</title>
+  <style>
+    @page {
+      size: 58mm auto;
+      margin: 0 !important;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    html, body {
+      width: 58mm;
+      max-width: 58mm;
+      margin: 0 auto;
+      padding: 2mm 2.5mm;
+      background: #ffffff;
+      color: #000000;
+      font-size: 11px;
+      line-height: 1.35;
+    }
+    .text-center { text-align: center; }
+    .text-right { text-align: right; }
+    .font-bold { font-weight: bold; }
+    .store-name {
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: -0.3px;
+      margin-bottom: 2px;
+    }
+    .store-sub {
+      font-size: 9.5px;
+      color: #333;
+      margin-bottom: 1.5px;
+    }
+    .dashed-divider {
+      border-top: 1px dashed #000;
+      margin: 6px 0;
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 2.5px;
+    }
+    .items-box {
+      margin: 4px 0;
+    }
+    .item-line {
+      margin-bottom: 3px;
+      font-size: 10.5px;
+      word-break: break-word;
+    }
+    .totals-box {
+      margin-top: 4px;
+    }
+    .grand-total {
+      font-size: 13px;
+      font-weight: 800;
+      border-top: 1px solid #000;
+      border-bottom: 1px solid #000;
+      padding: 3px 0;
+      margin: 4px 0;
+    }
+    .qr-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      margin-top: 8px;
+    }
+    .qr-img {
+      width: 84px;
+      height: 84px;
+      object-fit: contain;
+    }
+    .qr-text {
+      font-size: 8.5px;
+      color: #444;
+      margin-top: 2px;
+    }
+    .footer-note {
+      font-size: 9px;
+      text-align: center;
+      color: #444;
+      margin-top: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="text-center">
+    <div class="store-name">${storeSettings.storeName || 'NEXT FIT'}</div>
+    ${storeSettings.tagline ? `<div class="store-sub">${storeSettings.tagline}</div>` : ''}
+    ${storeSettings.address ? `<div class="store-sub">${storeSettings.address}</div>` : ''}
+    <div class="store-sub font-bold">Tel: ${storeSettings.phone || ''}</div>
+  </div>
+
+  <div class="dashed-divider"></div>
+
+  <div class="row">
+    <div>
+      <div style="font-size: 9px; color: #555;">${printableReceipt.type === 'PURCHASE' ? 'Supplier' : 'Customer'}</div>
+      <div class="font-bold">${printableReceipt.partyName}</div>
+      ${printableReceipt.partyPhone ? `<div>${printableReceipt.partyPhone}</div>` : ''}
+      ${printableReceipt.originalInvoiceNumber ? `<div style="font-size: 9px;">Ref: ${printableReceipt.originalInvoiceNumber}</div>` : ''}
+    </div>
+    <div class="text-right">
+      <div class="font-bold" style="font-size: 11.5px;">${printableReceipt.invoiceNumber}</div>
+      <div style="font-size: 9.5px;">${printableReceipt.date}</div>
+      <div style="font-size: 9.5px;">${printableReceipt.paymentMethod} · ${printableReceipt.status}</div>
+    </div>
+  </div>
+
+  <div class="dashed-divider"></div>
+
+  <div class="items-box">
+    <div class="row" style="font-size: 9px; font-weight: bold; margin-bottom: 4px;">
+      <span>ITEMS (${printableReceipt.itemsCount} pcs)</span>
+    </div>
+    ${items.map((line: string) => `<div class="item-line">• ${line}</div>`).join('')}
+    ${printableReceipt.returnReason ? `<div style="font-size: 9px; margin-top: 3px;"><b>Reason:</b> ${printableReceipt.returnReason}</div>` : ''}
+  </div>
+
+  <div class="dashed-divider"></div>
+
+  <div class="totals-box">
+    ${printableReceipt.type === 'RETURN' ? `
+      <div class="row">
+        <span>Adjustment / Refund</span>
+        <span class="font-bold">${printSym}${printableReceipt.grandTotal.toLocaleString()}</span>
+      </div>
+      <div class="row">
+        <span>Settlement Mode</span>
+        <span>${printableReceipt.paymentMethod}</span>
+      </div>
+    ` : `
+      <div class="row">
+        <span>Subtotal</span>
+        <span>${printSym}${printableReceipt.subtotal.toLocaleString()}</span>
+      </div>
+      ${printableReceipt.discount > 0 ? `
+      <div class="row">
+        <span>Discount</span>
+        <span>-${printSym}${printableReceipt.discount.toLocaleString()}</span>
+      </div>` : ''}
+      <div class="row grand-total">
+        <span>Grand Total</span>
+        <span>${printSym}${printableReceipt.grandTotal.toLocaleString()}</span>
+      </div>
+      <div class="row">
+        <span>Paid Amount (${printableReceipt.paymentMethod})</span>
+        <span class="font-bold">${printSym}${printableReceipt.paidAmount.toLocaleString()}</span>
+      </div>
+      <div class="row">
+        <span>Balance Due</span>
+        <span class="font-bold">${printSym}${printableReceipt.dueAmount.toLocaleString()}</span>
+      </div>
+    `}
+  </div>
+
+  ${receiptQrUrl ? `
+  <div class="dashed-divider"></div>
+  <div class="qr-container">
+    <img src="${receiptQrUrl}" alt="Invoice QR" class="qr-img" />
+    <div class="qr-text">Scan QR to Verify & Process Returns</div>
+  </div>
+  ` : ''}
+
+  ${storeSettings.invoiceFooterNote ? `
+  <div class="footer-note">${storeSettings.invoiceFooterNote}</div>
+  ` : ''}
+
+  <script>
+    window.onload = function() {
+      setTimeout(function() {
+        window.print();
+      }, 150);
+    };
+  </script>
+</body>
+</html>`);
+
+    printWindow.document.close();
+  };
+
   const isSalesActive = activeModule.startsWith('sales-');
   const isPurchaseActive = activeModule.startsWith('purchase-');
 
@@ -382,7 +585,7 @@ export function NavigationShell({ children }: { children: React.ReactNode }) {
       )}
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 lg:pl-[260px]">
+      <div className="flex-1 flex flex-col min-w-0 lg:pl-[260px] print:pl-0 print:m-0">
         {/* Top Bar Contract (Compact 54px Sticky Header for iPhone + 3-Zone Desktop Header) */}
         <header className="sticky top-0 z-30 h-[54px] lg:h-16 bg-white/90 backdrop-blur-md border-b border-slate-200 px-4 lg:px-8 flex items-center justify-between gap-4 print:hidden">
           {/* Zone 1: Menu Trigger (Mobile) + Breadcrumb Trail */}
@@ -582,8 +785,8 @@ export function NavigationShell({ children }: { children: React.ReactNode }) {
 
       {/* Printable Receipt / AirPrint Invoice Modal */}
       {printableReceipt && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 print:static print:bg-white print:p-0">
-          <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl border border-slate-200 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col print:border-none print:shadow-none print:w-[58mm] print:max-w-[58mm] print:max-h-none print:overflow-visible">
+        <div id="printable-receipt-modal" className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 print:static print:bg-white print:p-0 print:m-0">
+          <div id="printable-receipt-card" className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl border border-slate-200 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col print:border-none print:shadow-none print:w-[58mm] print:max-w-[58mm] print:max-h-none print:overflow-visible print:p-0 print:m-0">
             {/* Drag Handle for iPhone */}
             <div className="w-10 h-1.5 bg-slate-300 rounded-full mx-auto mt-3 sm:hidden print:hidden" />
 
@@ -756,11 +959,11 @@ export function NavigationShell({ children }: { children: React.ReactNode }) {
                 Close
               </button>
               <button
-                onClick={() => window.print()}
+                onClick={handlePrintReceipt}
                 className="flex-1 min-h-[46px] rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-sm"
               >
                 <Printer className="w-4 h-4" />
-                <span>Print / Save PDF</span>
+                <span>Print 58mm Receipt</span>
               </button>
             </div>
           </div>
@@ -771,6 +974,9 @@ export function NavigationShell({ children }: { children: React.ReactNode }) {
       <QrCameraScannerModal
         isOpen={globalScannerOpen}
         onClose={() => setGlobalScannerOpen(false)}
+        continuousMode={true}
+        title="POS Garment Barcode & QR Scanner"
+        subtitle="Point camera at tags to continuously add multiple garments to POS"
       />
     </div>
   );

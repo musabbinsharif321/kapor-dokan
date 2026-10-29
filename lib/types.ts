@@ -248,6 +248,24 @@ export interface ReturnExchangeRecord {
   updatedAt?: unknown;
 }
 
+export type LedgerTransactionType = 'DUE_COLLECTION' | 'DUE_PAYMENT' | 'INVOICE_BILL' | 'RETURN_REFUND';
+
+export interface LedgerTransaction {
+  id: string;
+  partyId: string;
+  partyName: string;
+  partyType: 'customer' | 'supplier';
+  type: LedgerTransactionType;
+  amount: number;
+  paymentMethod: PaymentMethod;
+  date: string;
+  invoiceNumber?: string;
+  notes?: string;
+  ownerId: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
 export function formatBDT(amount: number, symbol = '৳'): string {
   const safe = Number.isFinite(amount) ? amount : 0;
   return `${symbol}${safe.toLocaleString('en-IN', {
