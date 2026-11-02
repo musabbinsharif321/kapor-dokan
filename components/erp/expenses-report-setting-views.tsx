@@ -14,6 +14,8 @@ import {
   Bluetooth,
   Printer,
   CheckCircle2,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { useErp } from '@/context/erp-context';
 import { bluetoothPrinter } from '@/lib/thermal-printer';
@@ -469,8 +471,11 @@ export function SettingView() {
       key={
         storeSettings.storeName +
         storeSettings.phone +
+        storeSettings.address +
+        storeSettings.email +
         String(storeSettings.openingCash || 0) +
-        String(storeSettings.securityPin || '')
+        String(storeSettings.securityPin || '') +
+        (storeSettings.updatedAt || '')
       }
     />
   );
@@ -492,6 +497,7 @@ function SettingFormInner() {
     String(storeSettings.lowStockDefault || 5)
   );
   const [securityPin, setSecurityPin] = useState(storeSettings.securityPin || '1234');
+  const [showPin, setShowPin] = useState(false);
   const [openingCash, setOpeningCash] = useState(
     String(storeSettings.openingCash || 0)
   );
@@ -508,6 +514,7 @@ function SettingFormInner() {
     String(storeSettings.openingBank || 0)
   );
   const [saving, setSaving] = useState(false);
+  const [savedSuccess, setSavedSuccess] = useState(false);
   const [seeding, setSeeding] = useState(false);
   const [btStatus, setBtStatus] = useState<string | null>(
     bluetoothPrinter.getConnectedDeviceName()
@@ -560,6 +567,7 @@ function SettingFormInner() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
+    setSavedSuccess(false);
     try {
       await saveStoreSettings({
         storeName,
@@ -577,6 +585,10 @@ function SettingFormInner() {
         openingCard: Math.max(0, Number(openingCard) || 0),
         openingBank: Math.max(0, Number(openingBank) || 0),
       });
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 5000);
+    } catch (err: any) {
+      console.error('Settings save error:', err);
     } finally {
       setSaving(false);
     }
@@ -737,14 +749,34 @@ function SettingFormInner() {
               <label className="block text-xs font-semibold text-slate-700 mb-1">
                 Inventory Security PIN *
               </label>
-              <input
-                type="password"
-                required
-                value={securityPin}
-                onChange={(e) => setSecurityPin(e.target.value)}
-                placeholder="e.g. 1234"
-                className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-200 text-base sm:text-sm font-mono"
-              />
+              <div className="relative">
+                <input
+                  type="text"
+                  required
+                  value={securityPin}
+                  onChange={(e) => setSecurityPin(e.target.value)}
+                  placeholder="e.g. 1234"
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck="false"
+                  name="inventory_pin_code"
+                  id="inventory_pin_code"
+                  data-lpignore="true"
+                  style={{
+                    WebkitTextSecurity: showPin ? 'none' : 'disc',
+                  } as React.CSSProperties}
+                  className="w-full min-h-[42px] px-3.5 pr-10 py-2 rounded-xl border border-slate-200 text-base sm:text-sm font-mono tracking-widest"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPin((prev) => !prev)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
+                  title={showPin ? 'Hide PIN' : 'Show PIN'}
+                >
+                  {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
 
             <div>
@@ -816,14 +848,22 @@ function SettingFormInner() {
           </div>
         </div>
 
-        <button
-          type="submit"
-          disabled={saving}
-          className="min-h-[46px] px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm flex items-center justify-center gap-2"
-        >
-          <Save className="w-4 h-4" />
-          <span>{saving ? 'Saving Settings...' : 'Save Showroom Settings'}</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="submit"
+            disabled={saving}
+            className="min-h-[46px] px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-xs transition-all"
+          >
+            <Save className="w-4 h-4" />
+            <span>{saving ? 'Saving Settings...' : 'Save Showroom Settings'}</span>
+          </button>
+          {savedSuccess && (
+            <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3.5 py-2.5 rounded-xl animate-in fade-in">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              <span>Showroom Address & Profile Updated Successfully!</span>
+            </span>
+          )}
+        </div>
       </form>
 
       {/* Bluetooth Thermal Printer (MP-58T) Configuration Card */}

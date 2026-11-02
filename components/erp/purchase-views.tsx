@@ -977,6 +977,9 @@ export function PurchaseInvoiceView() {
       });
       setCart([]);
       setPaidAmount('0');
+    } catch (err: any) {
+      console.error('Purchase Invoice submit error:', err);
+      alert('Could not complete purchase invoice: ' + (err.message || 'Error occurred'));
     } finally {
       setSubmitting(false);
     }

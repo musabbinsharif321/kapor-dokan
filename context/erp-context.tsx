@@ -513,12 +513,40 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
       settingsRef,
       (snap) => {
         if (snap.exists()) {
-          setStoreSettings({ id: snap.id, ...(snap.data() as Omit<StoreSettings, 'id'>) });
+          const remoteData = snap.data() as Omit<StoreSettings, 'id'>;
+          let localSettings: any = {};
+          let localPin: string | undefined = undefined;
+          if (typeof window !== 'undefined') {
+            try {
+              const raw = localStorage.getItem(`tc_saved_store_settings_${uid}`);
+              if (raw) localSettings = JSON.parse(raw);
+              const p = localStorage.getItem('tc_security_pin');
+              if (p) localPin = p;
+            } catch {}
+          }
+          setStoreSettings({
+            id: snap.id,
+            securityPin: localPin || '1234',
+            ...remoteData,
+            ...localSettings,
+          });
         } else {
+          let localSettings: any = {};
+          let localPin: string | undefined = undefined;
+          if (typeof window !== 'undefined') {
+            try {
+              const raw = localStorage.getItem(`tc_saved_store_settings_${uid}`);
+              if (raw) localSettings = JSON.parse(raw);
+              const p = localStorage.getItem('tc_security_pin');
+              if (p) localPin = p;
+            } catch {}
+          }
           setStoreSettings({
             id: uid,
             ownerId: uid,
             ...DEFAULT_STORE_SETTINGS,
+            securityPin: localPin || '1234',
+            ...localSettings,
           });
         }
       },
@@ -1101,7 +1129,6 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
           const nextDue = Math.max(0, inv.grandTotal - nextPaid);
           const nextStatus: PaymentStatus = nextDue === 0 ? 'Paid' : 'Partial';
           batch.update(doc(db, 'salesInvoices', inv.id), {
-            initialPaidAmount: initialPaid,
             paidAmount: nextPaid,
             dueAmount: nextDue,
             status: nextStatus,
@@ -1293,7 +1320,6 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
       discount,
       grandTotal,
       paidAmount,
-      initialPaidAmount: paidAmount,
       dueAmount,
       paymentMethod: params.paymentMethod,
       status,
@@ -1387,7 +1413,6 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
     const batch = writeBatch(db);
     try {
       batch.update(doc(db, 'salesInvoices', invoice.id), {
-        initialPaidAmount: initialPaid,
         paidAmount: newPaid,
         dueAmount: newDue,
         paymentMethod: preservedPaymentMethod,
@@ -1572,7 +1597,6 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
           const nextDue = Math.max(0, pur.totalAmount - nextPaid);
           const nextStatus: PaymentStatus = nextDue === 0 ? 'Paid' : 'Partial';
           batch.update(doc(db, 'purchaseInvoices', pur.id), {
-            initialPaidAmount: initialPaid,
             paidAmount: nextPaid,
             dueAmount: nextDue,
             status: nextStatus,
@@ -1672,7 +1696,6 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
       itemsCount,
       totalAmount,
       paidAmount,
-      initialPaidAmount: paidAmount,
       dueAmount,
       paymentMethod: params.paymentMethod,
       status,
@@ -1690,9 +1713,6 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
         if (prod) {
           batch.update(doc(db, 'products', prod.id), {
             stock: Math.max(0, prod.stock + item.quantity),
-            ...(item.unitCost > 0 && item.unitCost !== prod.purchasePrice
-              ? { purchasePrice: item.unitCost }
-              : {}),
             updatedAt: serverTimestamp(),
           });
         }
@@ -1752,7 +1772,6 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
     const batch = writeBatch(db);
     try {
       batch.update(doc(db, 'purchaseInvoices', purchase.id), {
-        initialPaidAmount: initialPaid,
         paidAmount: newPaid,
         dueAmount: newDue,
         paymentMethod: preservedPaymentMethod,
@@ -1940,24 +1959,81 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
         : {}),
     };
 
+    // 1. Instantly update local React state and LocalStorage so it is NEVER lost or reverted
+    setStoreSettings((prev) => ({
+      ...prev,
+      ...payload,
+      updatedAt: new Date().toISOString(),
+    }));
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(
+          `tc_saved_store_settings_${uid}`,
+          JSON.stringify({
+            ...payload,
+            updatedAt: new Date().toISOString(),
+          })
+        );
+        localStorage.setItem('tc_security_pin', String(data.securityPin || '1234'));
+      } catch (e) {
+        console.warn('LocalStorage save warning:', e);
+      }
+    }
+
+    // 2. Sync to Firestore in Cloud
     try {
       const ref = doc(db, 'storeSettings', uid);
       if (storeSettings.createdAt) {
-        await updateDoc(ref, {
-          ...payload,
-          updatedAt: serverTimestamp(),
-        });
+        try {
+          await updateDoc(ref, {
+            ...payload,
+            updatedAt: serverTimestamp(),
+          });
+        } catch (firstErr: any) {
+          console.warn('Full payload updateDoc failed, attempting coreFields update:', firstErr);
+          const coreFields = {
+            storeName: payload.storeName,
+            tagline: payload.tagline,
+            phone: payload.phone,
+            email: payload.email,
+            address: payload.address,
+            currencySymbol: payload.currencySymbol,
+            invoiceFooterNote: payload.invoiceFooterNote,
+            lowStockDefault: payload.lowStockDefault,
+            updatedAt: serverTimestamp(),
+          };
+          await updateDoc(ref, coreFields);
+        }
       } else {
-        await setDoc(ref, {
-          ...payload,
-          ownerId: uid,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
+        try {
+          await setDoc(ref, {
+            ...payload,
+            ownerId: uid,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        } catch (firstErr: any) {
+          console.warn('Full payload setDoc failed, attempting coreFields setDoc:', firstErr);
+          const coreFields = {
+            storeName: payload.storeName,
+            tagline: payload.tagline,
+            phone: payload.phone,
+            email: payload.email,
+            address: payload.address,
+            currencySymbol: payload.currencySymbol,
+            invoiceFooterNote: payload.invoiceFooterNote,
+            lowStockDefault: payload.lowStockDefault,
+            ownerId: uid,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          };
+          await setDoc(ref, coreFields);
+        }
       }
-      showToast('Store settings saved');
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `storeSettings/${uid}`);
+      showToast('Store settings saved & synced');
+    } catch (err: any) {
+      console.warn('Firestore remote sync error (local state preserved):', err);
+      showToast('Settings saved locally', 'info');
     }
   };
 

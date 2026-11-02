@@ -492,7 +492,9 @@ service cloud.firestore {
       allow update: if isVerifiedUser() && isValidId(settingId) && settingId == request.auth.uid && isValidStoreSettings(incoming()) && existing().ownerId == request.auth.uid && incoming().ownerId == existing().ownerId && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time && (
         incoming().diff(existing()).affectedKeys().hasOnly([
           'storeName', 'tagline', 'phone', 'email', 'address',
-          'currencySymbol', 'invoiceFooterNote', 'lowStockDefault', 'updatedAt'
+          'currencySymbol', 'invoiceFooterNote', 'lowStockDefault',
+          'securityPin', 'openingCash', 'openingBkash', 'openingNagad', 'openingCard', 'openingBank',
+          'updatedAt'
         ])
       );
       allow delete: if false;

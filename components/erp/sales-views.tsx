@@ -1903,6 +1903,9 @@ export function SalesInvoiceView() {
       setCart([]);
       setDiscount('0');
       setPendingOrderForInvoice(null);
+    } catch (err: any) {
+      console.error('Sale Invoice submit error:', err);
+      alert('Could not complete sale: ' + (err.message || 'Error occurred'));
     } finally {
       setSubmitting(false);
     }

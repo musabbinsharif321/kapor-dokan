@@ -462,8 +462,11 @@ export function NavigationShell({ children }: { children: React.ReactNode }) {
             <span className="font-extrabold text-base tracking-tight text-white group-hover:text-blue-400 transition-colors truncate max-w-[155px]">
               {storeSettings.storeName || 'NEXT FIT'}
             </span>
-            <span className="text-[10px] text-slate-400 truncate max-w-[155px]">
-              {storeSettings.tagline || 'Menswear & Apparel ERP'}
+            <span
+              className="text-[10px] text-slate-400 truncate max-w-[155px]"
+              title={storeSettings.address || storeSettings.tagline}
+            >
+              {storeSettings.address || storeSettings.tagline || 'Menswear & Apparel ERP'}
             </span>
           </div>
         </button>
