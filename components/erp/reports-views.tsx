@@ -24,7 +24,13 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { useErp } from '@/context/erp-context';
-import { formatBDT } from '@/lib/types';
+import {
+  formatBDT,
+  getTodayBD,
+  getSalesInvoiceInitialPaid,
+  getPurchaseInvoiceInitialPaid,
+  PaymentMethod,
+} from '@/lib/types';
 
 /* ============================================================================
    REPORT VIEW (Interactive Report Hub with Individual Detailed Reports)
@@ -49,6 +55,7 @@ export function ReportView() {
     salesInvoices,
     purchaseInvoices,
     expenses,
+    returns,
     customers,
     suppliers,
     storeSettings,
@@ -58,7 +65,7 @@ export function ReportView() {
   const sym = storeSettings.currencySymbol || '৳';
 
   // Quick Today Statistics for Hub Preview & Daily Report
-  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const todayStr = useMemo(() => getTodayBD(), []);
 
   const todaySalesInvoices = useMemo(
     () => salesInvoices.filter((i) => i.invoiceDate && i.invoiceDate.slice(0, 10) === todayStr),
@@ -68,10 +75,21 @@ export function ReportView() {
     () => todaySalesInvoices.reduce((acc, i) => acc + i.grandTotal, 0),
     [todaySalesInvoices]
   );
-  const todayCollectedSales = useMemo(
-    () => todaySalesInvoices.reduce((acc, i) => acc + i.paidAmount, 0),
-    [todaySalesInvoices]
-  );
+  const todayCollectedSales = useMemo(() => {
+    const initialFromSales = todaySalesInvoices.reduce(
+      (acc, i) => acc + getSalesInvoiceInitialPaid(i, ledgerTransactions),
+      0
+    );
+    const dueCollectedToday = ledgerTransactions
+      .filter(
+        (t) =>
+          (t.type === 'DUE_COLLECTION' || (t.type as string) === 'CUSTOMER_DUE_COLLECTION') &&
+          t.date &&
+          t.date.slice(0, 10) === todayStr
+      )
+      .reduce((acc, t) => acc + t.amount, 0);
+    return initialFromSales + dueCollectedToday;
+  }, [todaySalesInvoices, ledgerTransactions, todayStr]);
   const todayExpensesList = useMemo(
     () => expenses.filter((e) => e.expenseDate && e.expenseDate.slice(0, 10) === todayStr),
     [expenses, todayStr]
@@ -103,32 +121,66 @@ export function ReportView() {
     [products]
   );
 
-  // Cash and Payment Channel Totals (All Time)
+  // Unified Cash and Payment Channel Balances (All Time, No Double Counting)
   const allTimePaymentBreakdown = useMemo(() => {
-    const cashSales = salesInvoices.filter((i) => i.paymentMethod === 'Cash').reduce((a, i) => a + i.paidAmount, 0);
-    const bkashSales = salesInvoices.filter((i) => i.paymentMethod === 'bKash').reduce((a, i) => a + i.paidAmount, 0);
-    const nagadSales = salesInvoices.filter((i) => i.paymentMethod === 'Nagad').reduce((a, i) => a + i.paidAmount, 0);
-    const cardSales = salesInvoices.filter((i) => i.paymentMethod === 'Card').reduce((a, i) => a + i.paidAmount, 0);
+    const computeChannelNet = (ch: PaymentMethod, opening: number) => {
+      const salesIn = salesInvoices
+        .filter((i) => i.paymentMethod === ch)
+        .reduce((a, i) => a + getSalesInvoiceInitialPaid(i, ledgerTransactions), 0);
+      const dueIn = ledgerTransactions
+        .filter(
+          (t) =>
+            (t.type === 'DUE_COLLECTION' || (t.type as string) === 'CUSTOMER_DUE_COLLECTION') &&
+            t.paymentMethod === ch
+        )
+        .reduce((a, t) => a + t.amount, 0);
+      const exchangeIn = returns
+        .filter(
+          (r) =>
+            r.type === 'EXCHANGE' &&
+            (r.exchangeExtraCharge || 0) > 0 &&
+            r.refundMethod === ch
+        )
+        .reduce((a, r) => a + (r.exchangeExtraCharge || 0), 0);
 
-    const cashExpenses = expenses.filter((e) => e.paymentMethod === 'Cash').reduce((a, e) => a + e.amount, 0);
+      const expOut = expenses
+        .filter((e) => e.paymentMethod === ch)
+        .reduce((a, e) => a + e.amount, 0);
+      const purOut = purchaseInvoices
+        .filter((p) => p.paymentMethod === ch)
+        .reduce((a, p) => a + getPurchaseInvoiceInitialPaid(p, ledgerTransactions), 0);
+      const supDueOut = ledgerTransactions
+        .filter(
+          (t) =>
+            (t.type === 'DUE_PAYMENT' || (t.type as string) === 'SUPPLIER_PAYMENT') &&
+            t.paymentMethod === ch
+        )
+        .reduce((a, t) => a + t.amount, 0);
+      const refundOut = returns
+        .filter((r) => (r.refundAmount || 0) > 0 && r.refundMethod === ch)
+        .reduce((a, r) => a + r.refundAmount, 0);
 
-    const cashCustomerCollections = ledgerTransactions
-      .filter((t) => t.type === 'CUSTOMER_DUE_COLLECTION' && t.paymentMethod === 'Cash')
-      .reduce((a, t) => a + t.amount, 0);
+      return Math.max(
+        0,
+        opening + salesIn + dueIn + exchangeIn - expOut - purOut - supDueOut - refundOut
+      );
+    };
 
-    const netCashInRegister = Math.max(
-      0,
-      cashSales + cashCustomerCollections - cashExpenses
-    );
+    const netCashInRegister = computeChannelNet('Cash', storeSettings.openingCash || 0);
+    const netBkash = computeChannelNet('bKash', storeSettings.openingBkash || 0);
+    const netNagad = computeChannelNet('Nagad', storeSettings.openingNagad || 0);
+    const netCard = computeChannelNet('Card', storeSettings.openingCard || 0);
+    const netBank = computeChannelNet('Bank', storeSettings.openingBank || 0);
 
     return {
-      Cash: cashSales,
-      bKash: bkashSales,
-      Nagad: nagadSales,
-      Card: cardSales,
+      Cash: netCashInRegister,
+      bKash: netBkash,
+      Nagad: netNagad,
+      Card: netCard,
+      Bank: netBank,
       netCashInRegister,
     };
-  }, [salesInvoices, expenses, purchaseInvoices, ledgerTransactions]);
+  }, [salesInvoices, expenses, purchaseInvoices, ledgerTransactions, returns, storeSettings]);
 
   // Balance Sheet Equation Values
   const totalAssets = useMemo(() => {
@@ -137,6 +189,7 @@ export function ReportView() {
       allTimePaymentBreakdown.bKash +
       allTimePaymentBreakdown.Nagad +
       allTimePaymentBreakdown.Card +
+      allTimePaymentBreakdown.Bank +
       totalCustomerDueAllTime +
       totalStockCostVal
     );
@@ -150,7 +203,7 @@ export function ReportView() {
       {/* Printable Letterhead (Only visible during print) */}
       <div className="hidden print:block text-center border-b-2 border-slate-900 pb-3 mb-4">
         <h1 className="text-xl font-bold uppercase tracking-wider text-black">
-          {storeSettings.storeName || 'ThreadCraft Apparel ERP'}
+          {storeSettings.storeName || 'NEXT FIT'}
         </h1>
         <p className="text-xs text-slate-700">{storeSettings.address}</p>
         <p className="text-xs font-mono text-slate-700">Phone: {storeSettings.phone}</p>
@@ -454,9 +507,14 @@ export function ReportView() {
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="font-sans text-slate-500">Nagad + Card POS:</span>
+                    <span className="font-sans text-slate-500">Nagad + Card + Bank:</span>
                     <span className="font-bold text-orange-600">
-                      {formatBDT(allTimePaymentBreakdown.Nagad + allTimePaymentBreakdown.Card, sym)}
+                      {formatBDT(
+                        allTimePaymentBreakdown.Nagad +
+                          allTimePaymentBreakdown.Card +
+                          allTimePaymentBreakdown.Bank,
+                        sym
+                      )}
                     </span>
                   </div>
                 </div>
@@ -580,6 +638,8 @@ export function ReportView() {
         <DailyReportViewInner
           salesInvoices={salesInvoices}
           expenses={expenses}
+          ledgerTransactions={ledgerTransactions}
+          returns={returns}
           sym={sym}
         />
       )}
@@ -596,6 +656,7 @@ export function ReportView() {
           bKashBalance={allTimePaymentBreakdown.bKash}
           nagadBalance={allTimePaymentBreakdown.Nagad}
           cardBalance={allTimePaymentBreakdown.Card}
+          bankBalance={allTimePaymentBreakdown.Bank}
           customerReceivables={totalCustomerDueAllTime}
           supplierPayables={totalSupplierPayableAllTime}
           stockCostVal={totalStockCostVal}
@@ -611,6 +672,7 @@ export function ReportView() {
         <ProfitLossViewInner
           salesInvoices={salesInvoices}
           expenses={expenses}
+          returns={returns}
           sym={sym}
         />
       )}
@@ -621,8 +683,11 @@ export function ReportView() {
       {activeReport === 'bank-accounts' && (
         <BankAccountsViewInner
           salesInvoices={salesInvoices}
+          purchaseInvoices={purchaseInvoices}
           expenses={expenses}
+          returns={returns}
           ledgerTransactions={ledgerTransactions}
+          storeSettings={storeSettings}
           sym={sym}
         />
       )}
@@ -663,13 +728,17 @@ export function ReportView() {
 function DailyReportViewInner({
   salesInvoices,
   expenses,
+  ledgerTransactions,
+  returns,
   sym,
 }: {
   salesInvoices: any[];
   expenses: any[];
+  ledgerTransactions: any[];
+  returns: any[];
   sym: string;
 }) {
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [selectedDate, setSelectedDate] = useState(() => getTodayBD());
   const [invoiceSearch, setInvoiceSearch] = useState('');
   const [dailyPage, setDailyPage] = useState(1);
   const dailyPageSize = 8;
@@ -682,23 +751,55 @@ function DailyReportViewInner({
     () => expenses.filter((e) => e.expenseDate && e.expenseDate.slice(0, 10) === selectedDate),
     [expenses, selectedDate]
   );
+  const dayDueCollections = useMemo(
+    () =>
+      ledgerTransactions.filter(
+        (t) =>
+          (t.type === 'DUE_COLLECTION' || (t.type as string) === 'CUSTOMER_DUE_COLLECTION') &&
+          t.date &&
+          t.date.slice(0, 10) === selectedDate
+      ),
+    [ledgerTransactions, selectedDate]
+  );
+  const dayReturns = useMemo(
+    () => returns.filter((r) => r.date && r.date.slice(0, 10) === selectedDate),
+    [returns, selectedDate]
+  );
 
   const dayGrossSales = daySales.reduce((a, i) => a + i.grandTotal, 0);
-  const dayCollected = daySales.reduce((a, i) => a + i.paidAmount, 0);
+  const dayInitialCollected = daySales.reduce(
+    (a, i) => a + getSalesInvoiceInitialPaid(i, ledgerTransactions),
+    0
+  );
+  const dayDueCollectedAmount = dayDueCollections.reduce((a, t) => a + t.amount, 0);
+  const dayCollected = dayInitialCollected + dayDueCollectedAmount;
   const dayDueCreated = daySales.reduce((a, i) => a + i.dueAmount, 0);
   const dayCOGS = daySales.reduce((a, i) => a + (i.totalCost || 0), 0);
-  const dayGrossProfit = dayGrossSales - dayCOGS;
+  const dayRefunds = dayReturns
+    .filter((r) => r.type === 'RETURN_REFUND')
+    .reduce((a, r) => a + (r.refundAmount || 0), 0);
+  const dayGrossProfit = dayGrossSales - dayRefunds - dayCOGS;
   const dayTotalExpenses = dayExpenses.reduce((a, e) => a + e.amount, 0);
   const dayNetProfit = dayGrossProfit - dayTotalExpenses;
 
   const dayPaymentMethods = useMemo(() => {
-    return {
-      Cash: daySales.filter((i) => i.paymentMethod === 'Cash').reduce((a, i) => a + i.paidAmount, 0),
-      bKash: daySales.filter((i) => i.paymentMethod === 'bKash').reduce((a, i) => a + i.paidAmount, 0),
-      Nagad: daySales.filter((i) => i.paymentMethod === 'Nagad').reduce((a, i) => a + i.paidAmount, 0),
-      Card: daySales.filter((i) => i.paymentMethod === 'Card').reduce((a, i) => a + i.paidAmount, 0),
+    const calcMethod = (ch: string) => {
+      const fromSales = daySales
+        .filter((i) => i.paymentMethod === ch)
+        .reduce((a, i) => a + getSalesInvoiceInitialPaid(i, ledgerTransactions), 0);
+      const fromDues = dayDueCollections
+        .filter((t) => t.paymentMethod === ch)
+        .reduce((a, t) => a + t.amount, 0);
+      return fromSales + fromDues;
     };
-  }, [daySales]);
+    return {
+      Cash: calcMethod('Cash'),
+      bKash: calcMethod('bKash'),
+      Nagad: calcMethod('Nagad'),
+      Card: calcMethod('Card'),
+      Bank: calcMethod('Bank'),
+    };
+  }, [daySales, dayDueCollections, ledgerTransactions]);
 
   const filteredInvoices = useMemo(() => {
     if (!invoiceSearch.trim()) return daySales;
@@ -740,7 +841,7 @@ function DailyReportViewInner({
           <button
             type="button"
             onClick={() => {
-              setSelectedDate(new Date().toISOString().slice(0, 10));
+              setSelectedDate(getTodayBD());
               setDailyPage(1);
             }}
             className="min-h-[42px] px-3.5 py-2 rounded-xl bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-semibold whitespace-nowrap active:scale-95 transition-all"
@@ -803,7 +904,7 @@ function DailyReportViewInner({
           <CreditCard className="w-4 h-4 text-blue-600" />
           <span>Payment Collection Channels for {selectedDate}</span>
         </h4>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 font-mono text-xs tabular-nums">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 font-mono text-xs tabular-nums">
           <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
             <span className="font-sans text-slate-500 block text-[11px]">Cash in Hand</span>
             <span className="font-bold text-slate-900 text-sm">{formatBDT(dayPaymentMethods.Cash, sym)}</span>
@@ -819,6 +920,10 @@ function DailyReportViewInner({
           <div className="p-3 rounded-xl bg-blue-50/60 border border-blue-100">
             <span className="font-sans text-blue-700 block text-[11px]">Card / POS Received</span>
             <span className="font-bold text-blue-800 text-sm">{formatBDT(dayPaymentMethods.Card, sym)}</span>
+          </div>
+          <div className="p-3 rounded-xl bg-emerald-50/60 border border-emerald-100">
+            <span className="font-sans text-emerald-700 block text-[11px]">Bank Transfer</span>
+            <span className="font-bold text-emerald-800 text-sm">{formatBDT(dayPaymentMethods.Bank, sym)}</span>
           </div>
         </div>
       </div>
@@ -990,6 +1095,7 @@ function BalanceSheetViewInner({
   bKashBalance,
   nagadBalance,
   cardBalance,
+  bankBalance,
   customerReceivables,
   supplierPayables,
   stockCostVal,
@@ -1003,6 +1109,7 @@ function BalanceSheetViewInner({
   bKashBalance: number;
   nagadBalance: number;
   cardBalance: number;
+  bankBalance: number;
   customerReceivables: number;
   supplierPayables: number;
   stockCostVal: number;
@@ -1083,11 +1190,11 @@ function BalanceSheetViewInner({
                   2. Digital Payments & Bank Balance
                 </span>
                 <span className="font-sans text-[11px] text-slate-400">
-                  bKash ({formatBDT(bKashBalance, sym)}), Nagad ({formatBDT(nagadBalance, sym)}), Card ({formatBDT(cardBalance, sym)})
+                  bKash ({formatBDT(bKashBalance, sym)}), Nagad ({formatBDT(nagadBalance, sym)}), Card ({formatBDT(cardBalance, sym)}), Bank ({formatBDT(bankBalance, sym)})
                 </span>
               </div>
               <span className="font-bold text-slate-900">
-                {formatBDT(bKashBalance + nagadBalance + cardBalance, sym)}
+                {formatBDT(bKashBalance + nagadBalance + cardBalance + bankBalance, sym)}
               </span>
             </div>
 
@@ -1212,26 +1319,27 @@ function BalanceSheetViewInner({
 function ProfitLossViewInner({
   salesInvoices,
   expenses,
+  returns,
   sym,
 }: {
   salesInvoices: any[];
   expenses: any[];
+  returns: any[];
   sym: string;
 }) {
   const [preset, setPreset] = useState<DatePreset>('thisMonth');
   const [customStart, setCustomStart] = useState(() => {
-    const d = new Date();
-    d.setDate(1);
-    return d.toISOString().slice(0, 10);
+    const todayStr = getTodayBD();
+    return `${todayStr.slice(0, 8)}01`;
   });
-  const [customEnd, setCustomEnd] = useState(() => new Date().toISOString().slice(0, 10));
+  const [customEnd, setCustomEnd] = useState(() => getTodayBD());
   const [invoiceSearch, setInvoiceSearch] = useState('');
   const [pnlPage, setPnlPage] = useState(1);
   const pnlPageSize = 8;
 
   const { startDate, endDate, periodLabel } = useMemo(() => {
-    const today = new Date();
-    const todayStr = today.toISOString().slice(0, 10);
+    const todayStr = getTodayBD();
+    const today = new Date(`${todayStr}T00:00:00`);
 
     if (preset === 'today') {
       return { startDate: todayStr, endDate: todayStr, periodLabel: "Today's Statement" };
@@ -1248,7 +1356,7 @@ function ProfitLossViewInner({
       return { startDate: w.toISOString().slice(0, 10), endDate: todayStr, periodLabel: 'Last 7 Days (This Week)' };
     }
     if (preset === 'thisMonth') {
-      const mStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
+      const mStart = `${todayStr.slice(0, 8)}01`;
       return { startDate: mStart, endDate: todayStr, periodLabel: 'This Month' };
     }
     if (preset === 'lastMonth') {
@@ -1282,15 +1390,28 @@ function ProfitLossViewInner({
     () => expenses.filter((e) => isDateInRange(e.expenseDate)),
     [expenses, startDate, endDate]
   );
+  const filteredReturns = useMemo(
+    () => returns.filter((r) => isDateInRange(r.date)),
+    [returns, startDate, endDate]
+  );
 
   const grossSales = filteredSales.reduce((a, i) => a + i.grandTotal, 0);
+  const returnRefunds = filteredReturns
+    .filter((r) => r.type === 'RETURN_REFUND')
+    .reduce((a, r) => a + (r.refundAmount || 0), 0);
+  const exchangeExtra = filteredReturns
+    .filter((r) => r.type === 'EXCHANGE')
+    .reduce((a, r) => a + (r.exchangeExtraCharge || 0), 0);
+  const netSalesRevenue = Math.max(0, grossSales + exchangeExtra - returnRefunds);
   const totalCOGS = filteredSales.reduce((a, i) => a + (i.totalCost || 0), 0);
-  const grossProfit = grossSales - totalCOGS;
-  const grossMarginPct = grossSales > 0 ? ((grossProfit / grossSales) * 100).toFixed(1) : '0.0';
+  const grossProfit = netSalesRevenue - totalCOGS;
+  const grossMarginPct =
+    netSalesRevenue > 0 ? ((grossProfit / netSalesRevenue) * 100).toFixed(1) : '0.0';
 
   const totalExpenses = filteredExpenses.reduce((a, e) => a + e.amount, 0);
   const netProfit = grossProfit - totalExpenses;
-  const netMarginPct = grossSales > 0 ? ((netProfit / grossSales) * 100).toFixed(1) : '0.0';
+  const netMarginPct =
+    netSalesRevenue > 0 ? ((netProfit / netSalesRevenue) * 100).toFixed(1) : '0.0';
 
   const searchedSales = useMemo(() => {
     if (!invoiceSearch.trim()) return filteredSales;
@@ -1573,57 +1694,109 @@ function ProfitLossViewInner({
    ============================================================================ */
 function BankAccountsViewInner({
   salesInvoices,
+  purchaseInvoices,
   expenses,
+  returns,
   ledgerTransactions,
+  storeSettings,
   sym,
 }: {
   salesInvoices: any[];
+  purchaseInvoices: any[];
   expenses: any[];
+  returns: any[];
   ledgerTransactions: any[];
+  storeSettings: any;
   sym: string;
 }) {
-  const [selectedChannel, setSelectedChannel] = useState<'ALL' | 'Cash' | 'bKash' | 'Nagad' | 'Card'>('ALL');
+  const [selectedChannel, setSelectedChannel] = useState<
+    'ALL' | 'Cash' | 'bKash' | 'Nagad' | 'Card' | 'Bank'
+  >('ALL');
 
-  // Breakdown metrics
+  // Breakdown metrics (Unified formula matching Balance Sheet & Dashboard)
   const channels = useMemo(() => {
-    const list = ['Cash', 'bKash', 'Nagad', 'Card'] as const;
+    const list = ['Cash', 'bKash', 'Nagad', 'Card', 'Bank'] as const;
     return list.map((ch) => {
+      const opening =
+        ch === 'Cash'
+          ? storeSettings?.openingCash || 0
+          : ch === 'bKash'
+          ? storeSettings?.openingBkash || 0
+          : ch === 'Nagad'
+          ? storeSettings?.openingNagad || 0
+          : ch === 'Card'
+          ? storeSettings?.openingCard || 0
+          : storeSettings?.openingBank || 0;
+
       const salesInflow = salesInvoices
         .filter((i) => i.paymentMethod === ch)
-        .reduce((a, i) => a + i.paidAmount, 0);
+        .reduce((a, i) => a + getSalesInvoiceInitialPaid(i, ledgerTransactions), 0);
 
       const dueInflow = ledgerTransactions
-        .filter((t) => t.type === 'CUSTOMER_DUE_COLLECTION' && t.paymentMethod === ch)
+        .filter(
+          (t) =>
+            (t.type === 'DUE_COLLECTION' || (t.type as string) === 'CUSTOMER_DUE_COLLECTION') &&
+            t.paymentMethod === ch
+        )
         .reduce((a, t) => a + t.amount, 0);
 
-      const totalInflow = salesInflow + dueInflow;
+      const exchangeInflow = returns
+        .filter(
+          (r) =>
+            r.type === 'EXCHANGE' &&
+            (r.exchangeExtraCharge || 0) > 0 &&
+            r.refundMethod === ch
+        )
+        .reduce((a, r) => a + (r.exchangeExtraCharge || 0), 0);
+
+      const totalInflow = opening + salesInflow + dueInflow + exchangeInflow;
 
       const expenseOutflow = expenses
         .filter((e) => e.paymentMethod === ch)
         .reduce((a, e) => a + e.amount, 0);
 
+      const purchaseOutflow = purchaseInvoices
+        .filter((p) => p.paymentMethod === ch)
+        .reduce((a, p) => a + getPurchaseInvoiceInitialPaid(p, ledgerTransactions), 0);
+
       const supplierOutflow = ledgerTransactions
-        .filter((t) => t.type === 'SUPPLIER_PAYMENT' && t.paymentMethod === ch)
+        .filter(
+          (t) =>
+            (t.type === 'DUE_PAYMENT' || (t.type as string) === 'SUPPLIER_PAYMENT') &&
+            t.paymentMethod === ch
+        )
         .reduce((a, t) => a + t.amount, 0);
 
-      const totalOutflow = expenseOutflow + supplierOutflow;
-      const netBalance = totalInflow - totalOutflow;
+      const refundOutflow = returns
+        .filter((r) => (r.refundAmount || 0) > 0 && r.refundMethod === ch)
+        .reduce((a, r) => a + r.refundAmount, 0);
+
+      const totalOutflow =
+        expenseOutflow + purchaseOutflow + supplierOutflow + refundOutflow;
+      const netBalance = Math.max(0, totalInflow - totalOutflow);
 
       return {
         id: ch,
-        label: ch === 'Cash' ? 'Cash Counter Drawer' : ch === 'Card' ? 'Card / Bank POS' : `${ch} Merchant`,
+        label:
+          ch === 'Cash'
+            ? 'Cash Counter Drawer'
+            : ch === 'Card'
+            ? 'Card / Bank POS'
+            : ch === 'Bank'
+            ? 'Bank Account'
+            : `${ch} Merchant`,
         totalInflow,
         totalOutflow,
         netBalance,
         salesCount: salesInvoices.filter((i) => i.paymentMethod === ch).length,
       };
     });
-  }, [salesInvoices, expenses, ledgerTransactions]);
+  }, [salesInvoices, purchaseInvoices, expenses, returns, ledgerTransactions, storeSettings]);
 
   return (
     <div className="space-y-4">
-      {/* 4 Payment Channel Account Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+      {/* 5 Payment Channel Account Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
         {channels.map((ch) => (
           <div
             key={ch.id}
@@ -1634,6 +1807,8 @@ function BankAccountsViewInner({
                 ? 'bg-pink-50 border-pink-200 text-pink-950'
                 : ch.id === 'Nagad'
                 ? 'bg-orange-50 border-orange-200 text-orange-950'
+                : ch.id === 'Bank'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
                 : 'bg-blue-50 border-blue-200 text-blue-950'
             }`}
           >
@@ -1647,12 +1822,12 @@ function BankAccountsViewInner({
                 Net Available Balance
               </span>
               <p className="text-xl font-black font-mono tabular-nums">
-                {formatBDT(Math.max(0, ch.netBalance), sym)}
+                {formatBDT(ch.netBalance, sym)}
               </p>
             </div>
             <div className="mt-3 pt-2 border-t border-black/10 dark:border-white/10 text-[11px] font-mono flex justify-between items-center">
               <span>Inflow: <strong>+{formatBDT(ch.totalInflow, sym)}</strong></span>
-              <span>Expenses: <strong>-{formatBDT(ch.totalOutflow, sym)}</strong></span>
+              <span>Outflow: <strong>-{formatBDT(ch.totalOutflow, sym)}</strong></span>
             </div>
           </div>
         ))}
@@ -1671,7 +1846,7 @@ function BankAccountsViewInner({
           </div>
 
           <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
-            {(['ALL', 'Cash', 'bKash', 'Nagad', 'Card'] as const).map((mode) => (
+            {(['ALL', 'Cash', 'bKash', 'Nagad', 'Card', 'Bank'] as const).map((mode) => (
               <button
                 key={mode}
                 type="button"

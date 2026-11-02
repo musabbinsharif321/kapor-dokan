@@ -13,7 +13,10 @@ service cloud.firestore {
     }
 
     function isVerifiedUser() {
-      return isSignedIn() && request.auth.token.email_verified == true;
+      return isSignedIn() && (
+        request.auth.token.email_verified == true ||
+        request.auth.token.firebase.sign_in_provider == 'password'
+      );
     }
 
     function isValidId(id) {
@@ -37,7 +40,8 @@ service cloud.firestore {
         method == 'Cash' ||
         method == 'bKash' ||
         method == 'Nagad' ||
-        method == 'Card'
+        method == 'Card' ||
+        method == 'Bank'
       );
     }
 
@@ -143,7 +147,7 @@ service cloud.firestore {
       data.keys().hasOnly([
         'orderNumber', 'customerId', 'customerName', 'itemsSummary',
         'itemsCount', 'totalAmount', 'status', 'orderDate', 'notes',
-        'ownerId', 'createdAt', 'updatedAt'
+        'items', 'ownerId', 'createdAt', 'updatedAt'
       ]) &&
       data.orderNumber is string && data.orderNumber.size() >= 1 && data.orderNumber.size() <= 40 &&
       data.customerId is string && data.customerId.size() >= 1 && data.customerId.size() <= 128 &&
@@ -159,6 +163,7 @@ service cloud.firestore {
       ) &&
       data.orderDate is string && data.orderDate.size() >= 1 && data.orderDate.size() <= 30 &&
       data.notes is string && data.notes.size() <= 300 &&
+      (!data.keys().hasAny(['items']) || data.items is list) &&
       isValidId(data.ownerId) && data.ownerId == request.auth.uid &&
       data.createdAt is timestamp &&
       data.updatedAt is timestamp;
@@ -175,7 +180,7 @@ service cloud.firestore {
       data.keys().hasOnly([
         'invoiceNumber', 'customerId', 'customerName', 'customerPhone',
         'itemsSummary', 'primaryCategory', 'itemsCount', 'totalCost',
-        'subtotal', 'discount', 'grandTotal', 'paidAmount', 'dueAmount',
+        'subtotal', 'discount', 'grandTotal', 'paidAmount', 'initialPaidAmount', 'dueAmount',
         'paymentMethod', 'status', 'invoiceDate', 'ownerId', 'createdAt', 'updatedAt'
       ]) &&
       data.invoiceNumber is string && data.invoiceNumber.size() >= 1 && data.invoiceNumber.size() <= 40 &&
@@ -190,6 +195,7 @@ service cloud.firestore {
       data.discount is number && data.discount >= 0 &&
       data.grandTotal is number && data.grandTotal >= 0 &&
       data.paidAmount is number && data.paidAmount >= 0 &&
+      (!data.keys().hasAny(['initialPaidAmount']) || (data.initialPaidAmount is number && data.initialPaidAmount >= 0)) &&
       data.dueAmount is number && data.dueAmount >= 0 &&
       isValidPaymentMethod(data.paymentMethod) &&
       isValidPaymentStatus(data.status) &&
@@ -229,7 +235,7 @@ service cloud.firestore {
       ]) &&
       data.keys().hasOnly([
         'invoiceNumber', 'supplierId', 'supplierName', 'itemsSummary',
-        'itemsCount', 'totalAmount', 'paidAmount', 'dueAmount',
+        'itemsCount', 'totalAmount', 'paidAmount', 'initialPaidAmount', 'dueAmount',
         'paymentMethod', 'status', 'purchaseDate', 'ownerId', 'createdAt', 'updatedAt'
       ]) &&
       data.invoiceNumber is string && data.invoiceNumber.size() >= 1 && data.invoiceNumber.size() <= 40 &&
@@ -239,6 +245,7 @@ service cloud.firestore {
       data.itemsCount is number && data.itemsCount >= 1 &&
       data.totalAmount is number && data.totalAmount >= 0 &&
       data.paidAmount is number && data.paidAmount >= 0 &&
+      (!data.keys().hasAny(['initialPaidAmount']) || (data.initialPaidAmount is number && data.initialPaidAmount >= 0)) &&
       data.dueAmount is number && data.dueAmount >= 0 &&
       isValidPaymentMethod(data.paymentMethod) &&
       isValidPaymentStatus(data.status) &&
@@ -287,6 +294,7 @@ service cloud.firestore {
       data.keys().hasOnly([
         'storeName', 'tagline', 'phone', 'email', 'address',
         'currencySymbol', 'invoiceFooterNote', 'lowStockDefault',
+        'securityPin', 'openingCash', 'openingBkash', 'openingNagad', 'openingCard', 'openingBank',
         'ownerId', 'createdAt', 'updatedAt'
       ]) &&
       data.storeName is string && data.storeName.size() >= 1 && data.storeName.size() <= 100 &&
@@ -297,6 +305,12 @@ service cloud.firestore {
       data.currencySymbol is string && data.currencySymbol.size() >= 1 && data.currencySymbol.size() <= 10 &&
       data.invoiceFooterNote is string && data.invoiceFooterNote.size() <= 300 &&
       data.lowStockDefault is number && data.lowStockDefault >= 0 &&
+      (!data.keys().hasAny(['securityPin']) || (data.securityPin is string && data.securityPin.size() <= 20)) &&
+      (!data.keys().hasAny(['openingCash']) || data.openingCash is number) &&
+      (!data.keys().hasAny(['openingBkash']) || data.openingBkash is number) &&
+      (!data.keys().hasAny(['openingNagad']) || data.openingNagad is number) &&
+      (!data.keys().hasAny(['openingCard']) || data.openingCard is number) &&
+      (!data.keys().hasAny(['openingBank']) || data.openingBank is number) &&
       isValidId(data.ownerId) && data.ownerId == request.auth.uid &&
       data.createdAt is timestamp &&
       data.updatedAt is timestamp;

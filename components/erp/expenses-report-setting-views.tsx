@@ -11,8 +11,12 @@ import {
   ChevronLeft,
   ChevronRight,
   Search,
+  Bluetooth,
+  Printer,
+  CheckCircle2,
 } from 'lucide-react';
 import { useErp } from '@/context/erp-context';
+import { bluetoothPrinter } from '@/lib/thermal-printer';
 import {
   Expense,
   ExpenseCategory,
@@ -20,6 +24,7 @@ import {
   PAYMENT_METHODS,
   PaymentMethod,
   formatBDT,
+  getTodayBD,
 } from '@/lib/types';
 
 /* ============================================================================
@@ -40,13 +45,11 @@ export function DailyExpensesView() {
   const [category, setCategory] = useState<ExpenseCategory>('Electricity');
   const [amount, setAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Cash');
-  const [expenseDate, setExpenseDate] = useState(
-    new Date().toISOString().slice(0, 10)
-  );
+  const [expenseDate, setExpenseDate] = useState(getTodayBD());
   const [notes, setNotes] = useState('');
 
   const sym = storeSettings.currencySymbol || '৳';
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayBD();
 
   const openAdd = () => {
     setEditingExpense(null);
@@ -267,7 +270,11 @@ export function DailyExpensesView() {
                   Edit
                 </button>
                 <button
-                  onClick={() => deleteExpense(exp.id)}
+                  onClick={() => {
+                    if (window.confirm(`Delete expense "${exp.title}"?`)) {
+                      deleteExpense(exp.id);
+                    }
+                  }}
                   className="min-h-[38px] min-w-[38px] rounded-xl border border-slate-200 text-slate-400 hover:text-red-600 flex items-center justify-center"
                   title="Delete Expense"
                 >
@@ -457,7 +464,16 @@ export { ReportView } from './reports-views';
    ============================================================================ */
 export function SettingView() {
   const { storeSettings } = useErp();
-  return <SettingFormInner key={storeSettings.storeName + storeSettings.phone} />;
+  return (
+    <SettingFormInner
+      key={
+        storeSettings.storeName +
+        storeSettings.phone +
+        String(storeSettings.openingCash || 0) +
+        String(storeSettings.securityPin || '')
+      }
+    />
+  );
 }
 
 function SettingFormInner() {
@@ -475,8 +491,71 @@ function SettingFormInner() {
   const [lowStockDefault, setLowStockDefault] = useState(
     String(storeSettings.lowStockDefault || 5)
   );
+  const [securityPin, setSecurityPin] = useState(storeSettings.securityPin || '1234');
+  const [openingCash, setOpeningCash] = useState(
+    String(storeSettings.openingCash || 0)
+  );
+  const [openingBkash, setOpeningBkash] = useState(
+    String(storeSettings.openingBkash || 0)
+  );
+  const [openingNagad, setOpeningNagad] = useState(
+    String(storeSettings.openingNagad || 0)
+  );
+  const [openingCard, setOpeningCard] = useState(
+    String(storeSettings.openingCard || 0)
+  );
+  const [openingBank, setOpeningBank] = useState(
+    String(storeSettings.openingBank || 0)
+  );
   const [saving, setSaving] = useState(false);
   const [seeding, setSeeding] = useState(false);
+  const [btStatus, setBtStatus] = useState<string | null>(
+    bluetoothPrinter.getConnectedDeviceName()
+  );
+  const [btConnecting, setBtConnecting] = useState(false);
+
+  const handleTestBtConnect = async () => {
+    setBtConnecting(true);
+    try {
+      const name = await bluetoothPrinter.connect();
+      setBtStatus(name);
+      alert(`Successfully connected to ${name}!`);
+    } catch (err: any) {
+      alert(err.message || 'Could not connect to Bluetooth printer.');
+    } finally {
+      setBtConnecting(false);
+    }
+  };
+
+  const handleTestBtPrint = async () => {
+    if (!bluetoothPrinter.isConnected()) {
+      alert('Please tap "Connect MP-58T Printer" first.');
+      return;
+    }
+    try {
+      await bluetoothPrinter.printReceipt({
+        storeName: storeSettings.storeName || 'NEXT FIT',
+        tagline: storeSettings.tagline,
+        address: storeSettings.address,
+        phone: storeSettings.phone,
+        invoiceNumber: 'TEST-0001',
+        date: getTodayBD(),
+        partyName: 'Test Customer',
+        itemsSummary: '1x Test Garment (L) [৳500]',
+        itemsCount: 1,
+        subtotal: 500,
+        discount: 0,
+        grandTotal: 500,
+        paidAmount: 500,
+        dueAmount: 0,
+        paymentMethod: 'Cash',
+        footerNote: 'Bluetooth Test Print Successful!',
+      });
+      alert('Test receipt sent to printer successfully!');
+    } catch (err: any) {
+      alert(err.message || 'Print error.');
+    }
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -491,6 +570,12 @@ function SettingFormInner() {
         currencySymbol,
         invoiceFooterNote,
         lowStockDefault: Number(lowStockDefault) || 5,
+        securityPin: securityPin.trim() || '1234',
+        openingCash: Math.max(0, Number(openingCash) || 0),
+        openingBkash: Math.max(0, Number(openingBkash) || 0),
+        openingNagad: Math.max(0, Number(openingNagad) || 0),
+        openingCard: Math.max(0, Number(openingCard) || 0),
+        openingBank: Math.max(0, Number(openingBank) || 0),
       });
     } finally {
       setSaving(false);
@@ -498,6 +583,13 @@ function SettingFormInner() {
   };
 
   const handleLoadSample = async () => {
+    if (
+      !window.confirm(
+        'Load sample 9-category garment catalog and demo transactions? Your existing custom store profile settings will be preserved.'
+      )
+    ) {
+      return;
+    }
     setSeeding(true);
     try {
       await seedSampleData();
@@ -629,6 +721,101 @@ function SettingFormInner() {
           />
         </div>
 
+        {/* Security PIN & Opening Account Balances */}
+        <div className="pt-4 border-t border-slate-200 space-y-4">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900">
+              Security PIN & Opening Account Balances
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Set the PIN required for inventory stock/item deletion and your starting balances for Cash, bKash, Nagad, Card, and Bank accounts.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Inventory Security PIN *
+              </label>
+              <input
+                type="password"
+                required
+                value={securityPin}
+                onChange={(e) => setSecurityPin(e.target.value)}
+                placeholder="e.g. 1234"
+                className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-200 text-base sm:text-sm font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Opening Cash ({currencySymbol})
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={openingCash}
+                onChange={(e) => setOpeningCash(e.target.value)}
+                className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-200 text-base sm:text-sm font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Opening Bank ({currencySymbol})
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={openingBank}
+                onChange={(e) => setOpeningBank(e.target.value)}
+                className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-200 text-base sm:text-sm font-mono"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Opening bKash ({currencySymbol})
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={openingBkash}
+                onChange={(e) => setOpeningBkash(e.target.value)}
+                className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-200 text-base sm:text-sm font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Opening Nagad ({currencySymbol})
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={openingNagad}
+                onChange={(e) => setOpeningNagad(e.target.value)}
+                className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-200 text-base sm:text-sm font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Opening Card/POS ({currencySymbol})
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={openingCard}
+                onChange={(e) => setOpeningCard(e.target.value)}
+                className="w-full min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-200 text-base sm:text-sm font-mono"
+              />
+            </div>
+          </div>
+        </div>
+
         <button
           type="submit"
           disabled={saving}
@@ -638,6 +825,76 @@ function SettingFormInner() {
           <span>{saving ? 'Saving Settings...' : 'Save Showroom Settings'}</span>
         </button>
       </form>
+
+      {/* Bluetooth Thermal Printer (MP-58T) Configuration Card */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="p-2 rounded-xl bg-indigo-50 text-indigo-600">
+                <Bluetooth className="w-5 h-5" />
+              </span>
+              <h3 className="text-base font-bold text-slate-900">
+                Bluetooth Thermal Printer (MP-58T / 58mm)
+              </h3>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">
+              Connect your portable 58mm Bluetooth printer directly to this ERP for instant receipt printing without wires.
+            </p>
+          </div>
+
+          <span
+            className={`px-3 py-1 rounded-full text-xs font-semibold shrink-0 ${
+              btStatus
+                ? 'bg-emerald-100 text-emerald-800'
+                : 'bg-slate-100 text-slate-600'
+            }`}
+          >
+            {btStatus ? `Connected: ${btStatus}` : 'Disconnected'}
+          </span>
+        </div>
+
+        <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80 text-xs space-y-2 text-slate-700 leading-relaxed">
+          <p className="font-semibold text-slate-900">
+            📱 মোবাইল থেকে কানেক্ট করার নিয়ম:
+          </p>
+          <ul className="list-disc list-inside space-y-1 text-slate-600 pl-1">
+            <li>
+              <strong>Android ও Computer:</strong> Google Chrome বা Microsoft Edge ব্রাউজারে সাইট ওপেন করে নিচের <em>&quot;Connect MP-58T Printer&quot;</em> বাটনে চাপ দিন।
+            </li>
+            <li>
+              <strong>iPhone / iPad (iOS):</strong> অ্যাপল Safari ব্রাউজারে ব্লুটুথ সাপোর্ট বন্ধ রাখে। তাই App Store থেকে ফ্রি <strong>&quot;Bluefy – Web BLE Browser&quot;</strong> অ্যাপটি নামিয়ে সাইট ওপেন করে কানেক্ট করুন অথবা ইনভয়েস থেকে <strong>&quot;iOS App Share&quot;</strong> ব্যবহার করুন।
+            </li>
+          </ul>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2.5 pt-1">
+          <button
+            type="button"
+            onClick={handleTestBtConnect}
+            disabled={btConnecting}
+            className="min-h-[44px] px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center gap-2 shadow-xs transition-all"
+          >
+            <Bluetooth className={`w-4 h-4 ${btConnecting ? 'animate-spin' : ''}`} />
+            <span>
+              {btConnecting
+                ? 'Searching Bluetooth...'
+                : btStatus
+                ? 'Reconnect / Change Printer'
+                : 'Connect MP-58T Printer'}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleTestBtPrint}
+            className="min-h-[44px] px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 font-semibold text-xs flex items-center gap-2"
+          >
+            <Printer className="w-4 h-4 text-slate-600" />
+            <span>Send Test Print</span>
+          </button>
+        </div>
+      </div>
 
       {/* Sample Store Data Seeder Card */}
       <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">

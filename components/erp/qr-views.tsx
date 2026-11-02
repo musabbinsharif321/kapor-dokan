@@ -21,6 +21,8 @@ import {
 import { useErp } from '@/context/erp-context';
 import { Product, formatBDT } from '@/lib/types';
 import { generateQrDataUrl, encodeProductQr } from '@/lib/qr-utils';
+import { bluetoothPrinter } from '@/lib/thermal-printer';
+import { Bluetooth } from 'lucide-react';
 import { QrCameraScannerModal } from './qr-camera-scanner-modal';
 
 /* ============================================================================
@@ -35,6 +37,7 @@ export function SingleProductQrModal({ product, onClose }: SingleProductQrModalP
   const { storeSettings } = useErp();
   const [qrUrl, setQrUrl] = useState<string>('');
   const [labelLayout, setLabelLayout] = useState<'landscape' | 'portrait'>('landscape');
+  const [btPrinting, setBtPrinting] = useState(false);
   const sym = storeSettings.currencySymbol || '৳';
 
   useEffect(() => {
@@ -58,12 +61,51 @@ export function SingleProductQrModal({ product, onClose }: SingleProductQrModalP
 
   if (!product) return null;
 
+  const handleBluetoothLabelPrint = async () => {
+    if (!product) return;
+    setBtPrinting(true);
+    try {
+      if (!bluetoothPrinter.isConnected()) {
+        await bluetoothPrinter.connect();
+      }
+      await bluetoothPrinter.printGarmentLabel({
+        brandName:
+          storeSettings.storeName && !storeSettings.storeName.includes('ThreadCraft')
+            ? storeSettings.storeName
+            : 'NEXT FIT',
+        productName: product.name,
+        sku: product.sku,
+        category: product.category,
+        size: product.size,
+        color: product.color,
+        price: product.sellingPrice,
+      });
+      alert(`Label for ${product.sku} sent to Bluetooth printer!`);
+    } catch (err: any) {
+      alert(err.message || 'Could not print label via Bluetooth.');
+    } finally {
+      setBtPrinting(false);
+    }
+  };
+
   const handlePrint = () => {
-    const brandName =
+    const esc = (raw: string | undefined | null) =>
+      String(raw ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    const brandName = esc(
       storeSettings.storeName && !storeSettings.storeName.includes('ThreadCraft')
         ? storeSettings.storeName
-        : 'NEXT FIT';
-    const priceFormatted = `${sym}${Number(product.sellingPrice).toLocaleString()}`;
+        : 'NEXT FIT'
+    );
+    const priceFormatted = esc(`${sym}${Number(product.sellingPrice).toLocaleString()}`);
+    const safeName = esc(product.name);
+    const safeCat = esc(product.category);
+    const safeSize = esc(product.size);
+    const safeColor = esc(product.color);
+    const safeSku = esc(product.sku);
 
     // Open clean, isolated print window strictly sized for 58mm / thermal label
     const printWindow = window.open('', '_blank', 'width=380,height=420');
@@ -78,7 +120,7 @@ export function SingleProductQrModal({ product, onClose }: SingleProductQrModalP
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>${product.name} - NEXT FIT Label</title>
+    <title>${safeName} - NEXT FIT Label</title>
     <style>
       @page {
         size: 58mm auto;
@@ -269,10 +311,10 @@ export function SingleProductQrModal({ product, onClose }: SingleProductQrModalP
       </div>
       <div class="info-col">
         <div class="brand-title">${brandName}</div>
-        <div class="item-title">${product.name}</div>
-        <div class="specs-line">${product.category} · Size ${product.size} · ${product.color}</div>
+        <div class="item-title">${safeName}</div>
+        <div class="specs-line">${safeCat} · Size ${safeSize} · ${safeColor}</div>
         <div class="price-row">
-          <span class="sku-text">${product.sku}</span>
+          <span class="sku-text">${safeSku}</span>
           <span class="price-tag">${priceFormatted}</span>
         </div>
       </div>
@@ -281,17 +323,17 @@ export function SingleProductQrModal({ product, onClose }: SingleProductQrModalP
         : `
     <div class="label-card">
       <div class="brand-title">${brandName}</div>
-      <div class="item-title">${product.name}</div>
+      <div class="item-title">${safeName}</div>
       <div class="qr-wrapper">
         <img src="${qrUrl}" class="qr-img" alt="QR" />
       </div>
       <div class="specs-row">
-        <span>${product.category}</span>
-        <span>Size: <strong>${product.size}</strong></span>
-        <span>${product.color}</span>
+        <span>${safeCat}</span>
+        <span>Size: <strong>${safeSize}</strong></span>
+        <span>${safeColor}</span>
       </div>
       <div class="price-row">
-        <span>${product.sku}</span>
+        <span>${safeSku}</span>
         <span class="price-tag">${priceFormatted}</span>
       </div>
     </div>
@@ -447,24 +489,33 @@ export function SingleProductQrModal({ product, onClose }: SingleProductQrModalP
         </div>
 
         {/* Action Buttons */}
-        <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center gap-2 print:hidden">
+        <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center gap-2 print:hidden">
+          <button
+            type="button"
+            onClick={handleBluetoothLabelPrint}
+            disabled={btPrinting}
+            className="flex-1 min-h-[44px] px-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all"
+          >
+            <Bluetooth className={`w-4 h-4 ${btPrinting ? 'animate-spin' : ''}`} />
+            <span>{btPrinting ? 'Printing Label...' : 'Bluetooth Print Label'}</span>
+          </button>
+          <button
+            onClick={handlePrint}
+            className="min-h-[44px] px-3.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 font-semibold text-xs flex items-center justify-center gap-1.5"
+          >
+            <Printer className="w-4 h-4 text-slate-600" />
+            <span>AirPrint</span>
+          </button>
           {qrUrl && (
             <a
               href={qrUrl}
               download={`${product.sku}-qr.png`}
-              className="flex-1 min-h-[44px] px-3 rounded-xl border border-slate-300 bg-white text-slate-700 font-semibold text-xs flex items-center justify-center gap-1.5 hover:bg-slate-50"
+              className="min-h-[44px] px-3 rounded-xl border border-slate-300 bg-white text-slate-700 font-semibold text-xs flex items-center justify-center gap-1 hover:bg-slate-50"
+              title="Download QR Image"
             >
               <Download className="w-4 h-4" />
-              <span>Download PNG</span>
             </a>
           )}
-          <button
-            onClick={handlePrint}
-            className="flex-1 min-h-[44px] px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs flex items-center justify-center gap-1.5 shadow-sm"
-          >
-            <Printer className="w-4 h-4" />
-            <span>Print 1-Page Label</span>
-          </button>
         </div>
       </div>
     </div>
@@ -651,7 +702,9 @@ export function QrLabelsPrintView() {
               <div className="flex items-start justify-between gap-2 pb-2 border-b border-dashed border-slate-200 print:pb-1">
                 <div className="min-w-0">
                   <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 print:text-black">
-                    {storeSettings.storeName || 'ThreadCraft'}
+                    {storeSettings.storeName && !storeSettings.storeName.includes('ThreadCraft')
+                      ? storeSettings.storeName
+                      : 'NEXT FIT'}
                   </p>
                   <h4 className="font-bold text-sm text-slate-900 truncate print:text-xs">
                     {product.name}

@@ -23,7 +23,13 @@ import {
   Calendar,
 } from 'lucide-react';
 import { useErp } from '@/context/erp-context';
-import { GARMENT_CATEGORIES, formatBDT } from '@/lib/types';
+import {
+  GARMENT_CATEGORIES,
+  formatBDT,
+  getTodayBD,
+  getSalesInvoiceInitialPaid,
+  getPurchaseInvoiceInitialPaid,
+} from '@/lib/types';
 
 export function DashboardView() {
   const {
@@ -34,6 +40,7 @@ export function DashboardView() {
     suppliers,
     expenses,
     purchaseInvoices,
+    returns,
     ledgerTransactions,
     storeSettings,
     setActiveModule,
@@ -44,30 +51,75 @@ export function DashboardView() {
 
   const [seeding, setSeeding] = useState(false);
   const sym = storeSettings.currencySymbol || '৳';
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayBD();
 
   // Key Financial & Operational Metrics
   const todaySalesInvoices = salesInvoices.filter((inv) => inv.invoiceDate === today);
-  const todaySales = todaySalesInvoices.reduce((acc, inv) => acc + inv.grandTotal, 0);
-  const todayCollected = todaySalesInvoices.reduce((acc, inv) => acc + inv.paidAmount, 0);
-
-  // Cash in Counter Drawer calculation
-  // (Cash Sales + Cash Due Collections - Cash Daily Expenses)
-  const cashSales = salesInvoices.filter((i) => i.paymentMethod === 'Cash').reduce((a, i) => a + i.paidAmount, 0);
-  const cashExpenses = expenses.filter((e) => e.paymentMethod === 'Cash').reduce((a, e) => a + e.amount, 0);
-  const cashCustomerCollections = ledgerTransactions
-    .filter((t) => t.type === 'CUSTOMER_DUE_COLLECTION' && t.paymentMethod === 'Cash')
-    .reduce((a, t) => a + t.amount, 0);
-  const cashInDrawer = Math.max(
-    0,
-    cashSales + cashCustomerCollections - cashExpenses
+  const todayDueCollections = ledgerTransactions.filter(
+    (t) => t.type === 'DUE_COLLECTION' && t.date === today
   );
+  const todaySales = todaySalesInvoices.reduce((acc, inv) => acc + inv.grandTotal, 0);
+  const todayCollected =
+    todaySalesInvoices.reduce(
+      (acc, inv) => acc + getSalesInvoiceInitialPaid(inv, ledgerTransactions),
+      0
+    ) + todayDueCollections.reduce((acc, t) => acc + t.amount, 0);
 
-  const todayCashSales = todaySalesInvoices
-    .filter((inv) => inv.paymentMethod === 'Cash')
-    .reduce((acc, inv) => acc + inv.paidAmount, 0);
+  // Cash in Counter Drawer calculation (aligned 100% with Balance Sheet & Bank/Accounts)
+  const openingCash = Number(storeSettings.openingCash) || 0;
+  const cashSales = salesInvoices
+    .filter((i) => i.paymentMethod === 'Cash')
+    .reduce((a, i) => a + getSalesInvoiceInitialPaid(i, ledgerTransactions), 0);
+  const cashCustomerCollections = ledgerTransactions
+    .filter((t) => t.type === 'DUE_COLLECTION' && t.paymentMethod === 'Cash')
+    .reduce((a, t) => a + t.amount, 0);
+  const cashExchangeExtra = returns
+    .filter((r) => r.type === 'EXCHANGE' && (r.exchangeExtraCharge || 0) > 0 && r.refundMethod === 'Cash')
+    .reduce((a, r) => a + (r.exchangeExtraCharge || 0), 0);
+  const cashExpenses = expenses
+    .filter((e) => e.paymentMethod === 'Cash')
+    .reduce((a, e) => a + e.amount, 0);
+  const cashPurchases = purchaseInvoices
+    .filter((p) => p.paymentMethod === 'Cash')
+    .reduce((a, p) => a + getPurchaseInvoiceInitialPaid(p, ledgerTransactions), 0);
+  const cashSupplierPayments = ledgerTransactions
+    .filter((t) => t.type === 'DUE_PAYMENT' && t.paymentMethod === 'Cash')
+    .reduce((a, t) => a + t.amount, 0);
+  const cashReturnRefunds = returns
+    .filter((r) => r.type === 'RETURN_REFUND' && r.refundMethod === 'Cash')
+    .reduce((a, r) => a + r.refundAmount, 0);
 
-  const totalSalesRevenue = salesInvoices.reduce((acc, inv) => acc + inv.grandTotal, 0);
+  const cashInDrawer =
+    openingCash +
+    cashSales +
+    cashCustomerCollections +
+    cashExchangeExtra -
+    cashExpenses -
+    cashPurchases -
+    cashSupplierPayments -
+    cashReturnRefunds;
+
+  const todayCashSales =
+    todaySalesInvoices
+      .filter((inv) => inv.paymentMethod === 'Cash')
+      .reduce((acc, inv) => acc + getSalesInvoiceInitialPaid(inv, ledgerTransactions), 0) +
+    todayDueCollections
+      .filter((t) => t.paymentMethod === 'Cash')
+      .reduce((acc, t) => acc + t.amount, 0);
+
+  const totalReturnRefunds = returns
+    .filter((r) => r.type === 'RETURN_REFUND')
+    .reduce((acc, r) => acc + r.refundAmount, 0);
+  const totalExchangeExtra = returns
+    .filter((r) => r.type === 'EXCHANGE')
+    .reduce((acc, r) => acc + (r.exchangeExtraCharge || 0), 0);
+
+  const totalSalesRevenue = Math.max(
+    0,
+    salesInvoices.reduce((acc, inv) => acc + inv.grandTotal, 0) -
+      totalReturnRefunds +
+      totalExchangeExtra
+  );
   const totalCOGS = salesInvoices.reduce((acc, inv) => acc + (inv.totalCost || 0), 0);
   const totalExpenses = expenses.reduce((acc, exp) => acc + exp.amount, 0);
   const todayExpenses = expenses

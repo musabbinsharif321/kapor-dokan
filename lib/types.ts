@@ -1,4 +1,5 @@
 export type GarmentCategory = string;
+export type GarmentSize = string;
 
 export interface CategoryOption {
   id?: string;
@@ -27,17 +28,21 @@ export const GARMENT_SIZES = [
   'L',
   'XL',
   'XXL',
+  '3XL',
   '28',
   '30',
   '32',
   '34',
   '36',
   '38',
+  '40',
+  '42',
+  '44',
   'Free',
 ];
 
-export type PaymentMethod = 'Cash' | 'bKash' | 'Nagad' | 'Card';
-export const PAYMENT_METHODS: PaymentMethod[] = ['Cash', 'bKash', 'Nagad', 'Card'];
+export type PaymentMethod = 'Cash' | 'bKash' | 'Nagad' | 'Card' | 'Bank';
+export const PAYMENT_METHODS: PaymentMethod[] = ['Cash', 'bKash', 'Nagad', 'Card', 'Bank'];
 
 export type PaymentStatus = 'Paid' | 'Partial' | 'Due';
 export type OrderStatus = 'Pending' | 'Confirmed' | 'Invoiced' | 'Cancelled';
@@ -127,6 +132,18 @@ export interface Customer {
   updatedAt?: unknown;
 }
 
+export interface SalesOrderItem {
+  productId: string;
+  name: string;
+  sku: string;
+  category: GarmentCategory;
+  size: GarmentSize;
+  color: string;
+  unitPrice: number;
+  unitCost: number;
+  quantity: number;
+}
+
 export interface SalesOrder {
   id: string;
   orderNumber: string;
@@ -138,6 +155,7 @@ export interface SalesOrder {
   status: OrderStatus;
   orderDate: string;
   notes: string;
+  items?: SalesOrderItem[];
   ownerId: string;
   createdAt?: unknown;
   updatedAt?: unknown;
@@ -157,6 +175,7 @@ export interface SalesInvoice {
   discount: number;
   grandTotal: number;
   paidAmount: number;
+  initialPaidAmount?: number;
   dueAmount: number;
   paymentMethod: PaymentMethod;
   status: PaymentStatus;
@@ -188,6 +207,7 @@ export interface PurchaseInvoice {
   itemsCount: number;
   totalAmount: number;
   paidAmount: number;
+  initialPaidAmount?: number;
   dueAmount: number;
   paymentMethod: PaymentMethod;
   status: PaymentStatus;
@@ -220,6 +240,12 @@ export interface StoreSettings {
   currencySymbol: string;
   invoiceFooterNote: string;
   lowStockDefault: number;
+  securityPin?: string;
+  openingCash?: number;
+  openingBkash?: number;
+  openingNagad?: number;
+  openingCard?: number;
+  openingBank?: number;
   ownerId: string;
   createdAt?: unknown;
   updatedAt?: unknown;
@@ -276,4 +302,44 @@ export function formatBDT(amount: number, symbol = '৳'): string {
 
 export function sanitizeDocId(raw: string): string {
   return raw.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 120) || `id_${Date.now()}`;
+}
+
+export function getTodayBD(): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Dhaka',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+  } catch {
+    const d = new Date(Date.now() + 6 * 60 * 60 * 1000);
+    return d.toISOString().slice(0, 10);
+  }
+}
+
+export function getSalesInvoiceInitialPaid(
+  inv: SalesInvoice,
+  ledgerTransactions: LedgerTransaction[]
+): number {
+  if (typeof inv.initialPaidAmount === 'number' && Number.isFinite(inv.initialPaidAmount)) {
+    return Math.max(0, inv.initialPaidAmount);
+  }
+  const settledViaLedger = ledgerTransactions
+    .filter((t) => t.type === 'DUE_COLLECTION' && t.invoiceNumber === inv.invoiceNumber)
+    .reduce((sum, t) => sum + t.amount, 0);
+  return Math.max(0, inv.paidAmount - settledViaLedger);
+}
+
+export function getPurchaseInvoiceInitialPaid(
+  inv: PurchaseInvoice,
+  ledgerTransactions: LedgerTransaction[]
+): number {
+  if (typeof inv.initialPaidAmount === 'number' && Number.isFinite(inv.initialPaidAmount)) {
+    return Math.max(0, inv.initialPaidAmount);
+  }
+  const settledViaLedger = ledgerTransactions
+    .filter((t) => t.type === 'DUE_PAYMENT' && t.invoiceNumber === inv.invoiceNumber)
+    .reduce((sum, t) => sum + t.amount, 0);
+  return Math.max(0, inv.paidAmount - settledViaLedger);
 }

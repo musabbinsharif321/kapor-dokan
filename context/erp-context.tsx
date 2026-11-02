@@ -9,6 +9,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
+  sendEmailVerification,
 } from 'firebase/auth';
 import {
   collection,
@@ -51,6 +52,9 @@ import {
   ReturnType,
   LedgerTransaction,
   sanitizeDocId,
+  getTodayBD,
+  getSalesInvoiceInitialPaid,
+  getPurchaseInvoiceInitialPaid,
 } from '@/lib/types';
 import {
   SAMPLE_PRODUCTS,
@@ -128,6 +132,7 @@ interface ErpContextValue {
   setPendingOrderForInvoice: (order: SalesOrder | null) => void;
   pendingCartProducts: Product[];
   addPendingCartProduct: (product: Product) => void;
+  removePendingCartProduct: (productId: string) => void;
   clearPendingCartProducts: () => void;
   signInWithGoogle: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
@@ -282,13 +287,21 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
     setPendingCartProducts((prev) => [...prev, product]);
   }, []);
 
+  const removePendingCartProduct = useCallback((productId: string) => {
+    setPendingCartProducts((prev) => {
+      const idx = prev.findIndex((p) => p.id === productId);
+      if (idx === -1) return prev;
+      return [...prev.slice(0, idx), ...prev.slice(idx + 1)];
+    });
+  }, []);
+
   const clearPendingCartProducts = useCallback(() => {
     setPendingCartProducts([]);
   }, []);
 
   const openReturnForInvoice = useCallback((inv: SalesInvoice) => {
     setPendingReturnInvoice(inv);
-    setActiveModule('sales-invoice');
+    setActiveModule('sales-returns');
   }, []);
 
   const allCategories = useMemo<CategoryOption[]>(() => {
@@ -406,7 +419,7 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
           id: d.id,
           ...(d.data() as Omit<SalesOrder, 'id'>),
         }));
-        list.sort((a, b) => b.orderDate.localeCompare(a.orderDate));
+        list.sort((a, b) => b.orderDate.localeCompare(a.orderDate) || b.id.localeCompare(a.id));
         setSalesOrders(list);
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'salesOrders')
@@ -420,7 +433,7 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
           id: d.id,
           ...(d.data() as Omit<SalesInvoice, 'id'>),
         }));
-        list.sort((a, b) => b.invoiceDate.localeCompare(a.invoiceDate));
+        list.sort((a, b) => b.invoiceDate.localeCompare(a.invoiceDate) || b.id.localeCompare(a.id));
         setSalesInvoices(list);
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'salesInvoices')
@@ -445,7 +458,7 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
           id: d.id,
           ...(d.data() as Omit<PurchaseInvoice, 'id'>),
         }));
-        list.sort((a, b) => b.purchaseDate.localeCompare(a.purchaseDate));
+        list.sort((a, b) => b.purchaseDate.localeCompare(a.purchaseDate) || b.id.localeCompare(a.id));
         setPurchaseInvoices(list);
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'purchaseInvoices')
@@ -459,7 +472,7 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
           id: d.id,
           ...(d.data() as Omit<Expense, 'id'>),
         }));
-        list.sort((a, b) => b.expenseDate.localeCompare(a.expenseDate));
+        list.sort((a, b) => b.expenseDate.localeCompare(a.expenseDate) || b.id.localeCompare(a.id));
         setExpenses(list);
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'expenses')
@@ -473,7 +486,7 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
           id: d.id,
           ...(d.data() as Omit<ReturnExchangeRecord, 'id'>),
         }));
-        list.sort((a, b) => b.id.localeCompare(a.id));
+        list.sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
         setReturns(list);
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'returns')
@@ -487,7 +500,7 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
           id: d.id,
           ...(d.data() as Omit<LedgerTransaction, 'id'>),
         }));
-        list.sort((a, b) => b.date.localeCompare(a.date));
+        list.sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
         setLedgerTransactions(list);
       },
       (err) => {
@@ -563,7 +576,12 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
 
   const signUpWithEmail = async (email: string, password: string) => {
     try {
-      await createUserWithEmailAndPassword(auth, email.trim(), password);
+      const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
+      try {
+        await sendEmailVerification(cred.user);
+      } catch {
+        // Non-blocking if email verification dispatch is rate-limited
+      }
       showToast('Account created successfully');
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code || '';
@@ -599,7 +617,7 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
   const seedSampleData = async () => {
     if (!user) return;
     const uid = user.uid;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getTodayBD();
     const batch = writeBatch(db);
 
     try {
@@ -648,6 +666,7 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
         const id = sanitizeDocId(`inv_sample_${idx + 1}_${uid.slice(0, 6)}`);
         batch.set(doc(db, 'salesInvoices', id), {
           ...inv,
+          initialPaidAmount: inv.paidAmount,
           customerId: sanitizeDocId(`${inv.customerId}_${uid.slice(0, 6)}`),
           ownerId: uid,
           createdAt: serverTimestamp(),
@@ -659,6 +678,7 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
         const id = sanitizeDocId(`pur_sample_${idx + 1}_${uid.slice(0, 6)}`);
         batch.set(doc(db, 'purchaseInvoices', id), {
           ...pur,
+          initialPaidAmount: pur.paidAmount,
           supplierId: sanitizeDocId(`${pur.supplierId}_${uid.slice(0, 6)}`),
           ownerId: uid,
           createdAt: serverTimestamp(),
@@ -690,13 +710,15 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
         updatedAt: serverTimestamp(),
       });
 
-      const settingsRef = doc(db, 'storeSettings', uid);
-      batch.set(settingsRef, {
-        ...DEFAULT_STORE_SETTINGS,
-        ownerId: uid,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+      if (!storeSettings.createdAt) {
+        const settingsRef = doc(db, 'storeSettings', uid);
+        batch.set(settingsRef, {
+          ...DEFAULT_STORE_SETTINGS,
+          ownerId: uid,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
 
       await batch.commit();
       showToast('Loaded sample apparel catalog across all categories!');
@@ -908,6 +930,7 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
       const returnId = sanitizeDocId(`ret_${Date.now()}`);
       const returnNumber = `RET-${Math.floor(1000 + Math.random() * 9000)}`;
 
+      const todayStr = getTodayBD();
       batch.set(doc(db, 'returns', returnId), {
         returnNumber,
         originalInvoiceNumber: params.originalInvoiceNumber,
@@ -922,7 +945,7 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
         exchangeQty: params.exchangeQty || 0,
         exchangeExtraCharge: params.exchangeExtraCharge || 0,
         reason: params.reason || 'Customer Request',
-        date: new Date().toISOString().slice(0, 10),
+        date: todayStr,
         ownerId: user.uid,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -965,10 +988,15 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
       await batch.commit();
       showToast(`Return / Exchange ${returnNumber} processed successfully!`);
 
+      const receiptAmount =
+        params.type === 'EXCHANGE' && (params.exchangeExtraCharge || 0) > 0
+          ? Number(params.exchangeExtraCharge) || 0
+          : Math.max(0, Number(params.refundAmount) || 0);
+
       const receipt: PrintableReceiptData = {
         type: 'RETURN',
         invoiceNumber: returnNumber,
-        date: new Date().toISOString().slice(0, 10),
+        date: todayStr,
         partyName: params.customerName || 'Walk-in Customer',
         partyPhone: params.customerPhone || '',
         itemsSummary:
@@ -976,10 +1004,10 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
             ? `RETURNED: ${params.returnedQty}x ${params.returnedItemSummary} · REPLACED: ${params.exchangeQty || 1}x ${params.exchangeItemSummary || 'Garment Item'}`
             : `RETURNED: ${params.returnedQty}x ${params.returnedItemSummary}`,
         itemsCount: params.returnedQty,
-        subtotal: params.refundAmount,
+        subtotal: receiptAmount,
         discount: 0,
-        grandTotal: params.refundAmount,
-        paidAmount: params.refundAmount,
+        grandTotal: receiptAmount,
+        paidAmount: receiptAmount,
         dueAmount: 0,
         paymentMethod: params.refundMethod || 'Cash',
         status: 'Completed',
@@ -1048,14 +1076,42 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
 
     const newDue = Math.max(0, target.totalDue - collected);
     const ledgerId = sanitizeDocId(`led_cus_${Date.now()}`);
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = getTodayBD();
 
     try {
+      const batch = writeBatch(db);
       // 1. Update customer totalDue
-      await updateDoc(doc(db, 'customers', customerId), {
+      batch.update(doc(db, 'customers', customerId), {
         totalDue: newDue,
         updatedAt: serverTimestamp(),
       });
+
+      // 2. Allocate collected due FIFO across open invoices for this customer
+      const openInvoices = salesInvoices
+        .filter((inv) => inv.customerId === customerId && inv.dueAmount > 0)
+        .sort((a, b) => a.invoiceDate.localeCompare(b.invoiceDate) || a.id.localeCompare(b.id));
+
+      let remainingToAllocate = collected;
+      for (const inv of openInvoices) {
+        if (remainingToAllocate <= 0) break;
+        const alloc = Math.min(remainingToAllocate, inv.dueAmount);
+        if (alloc > 0) {
+          const initialPaid = getSalesInvoiceInitialPaid(inv, ledgerTransactions);
+          const nextPaid = inv.paidAmount + alloc;
+          const nextDue = Math.max(0, inv.grandTotal - nextPaid);
+          const nextStatus: PaymentStatus = nextDue === 0 ? 'Paid' : 'Partial';
+          batch.update(doc(db, 'salesInvoices', inv.id), {
+            initialPaidAmount: initialPaid,
+            paidAmount: nextPaid,
+            dueAmount: nextDue,
+            status: nextStatus,
+            updatedAt: serverTimestamp(),
+          });
+          remainingToAllocate -= alloc;
+        }
+      }
+
+      await batch.commit();
 
       const newTx: LedgerTransaction = {
         id: ledgerId,
@@ -1073,7 +1129,7 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
       // Optimistically add to state so UI updates instantly
       setLedgerTransactions((prev) => [newTx, ...prev.filter((t) => t.id !== ledgerId)]);
 
-      // 2. Persist to Firestore
+      // 3. Persist to Firestore
       try {
         await setDoc(doc(db, 'ledgerTransactions', ledgerId), {
           ...newTx,
@@ -1115,19 +1171,23 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
       itemsCount: Math.max(1, Math.floor(Number(data.itemsCount) || 1)),
       totalAmount: Math.max(0, Number(data.totalAmount) || 0),
       status: data.status,
-      orderDate: data.orderDate.trim().slice(0, 30) || new Date().toISOString().slice(0, 10),
+      orderDate: data.orderDate.trim().slice(0, 30) || getTodayBD(),
       notes: data.notes.trim().slice(0, 300),
+      ...(data.items && data.items.length > 0 ? { items: data.items } : {}),
     };
 
     try {
       if (existingId) {
         await updateDoc(doc(db, 'salesOrders', id), {
+          customerId: payload.customerId,
           customerName: payload.customerName,
           itemsSummary: payload.itemsSummary,
           itemsCount: payload.itemsCount,
           totalAmount: payload.totalAmount,
           status: payload.status,
+          orderDate: payload.orderDate,
           notes: payload.notes,
+          ...(payload.items ? { items: payload.items } : {}),
           updatedAt: serverTimestamp(),
         });
         showToast('Sales order updated');
@@ -1233,10 +1293,11 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
       discount,
       grandTotal,
       paidAmount,
+      initialPaidAmount: paidAmount,
       dueAmount,
       paymentMethod: params.paymentMethod,
       status,
-      invoiceDate: params.invoiceDate.slice(0, 30) || new Date().toISOString().slice(0, 10),
+      invoiceDate: params.invoiceDate.slice(0, 30) || getTodayBD(),
       ownerId: user.uid,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -1316,16 +1377,20 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
     const add = Math.min(invoice.dueAmount, Math.max(0, Number(additionalPaid) || 0));
     if (add <= 0) return;
 
+    const initialPaid = getSalesInvoiceInitialPaid(invoice, ledgerTransactions);
     const newPaid = invoice.paidAmount + add;
     const newDue = Math.max(0, invoice.grandTotal - newPaid);
     const newStatus: PaymentStatus = newDue === 0 ? 'Paid' : 'Partial';
+    const preservedPaymentMethod: PaymentMethod =
+      initialPaid > 0 ? invoice.paymentMethod : method;
 
     const batch = writeBatch(db);
     try {
       batch.update(doc(db, 'salesInvoices', invoice.id), {
+        initialPaidAmount: initialPaid,
         paidAmount: newPaid,
         dueAmount: newDue,
-        paymentMethod: method,
+        paymentMethod: preservedPaymentMethod,
         status: newStatus,
         updatedAt: serverTimestamp(),
       });
@@ -1343,20 +1408,27 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
       await batch.commit();
       showToast(`Collected due payment on ${invoice.invoiceNumber}`);
 
+      const ledgerId = sanitizeDocId(`led_inv_${Date.now()}`);
+      const todayStr = getTodayBD();
+      const newTx: LedgerTransaction = {
+        id: ledgerId,
+        partyId: invoice.customerId || 'WALK_IN',
+        partyName: invoice.customerName,
+        partyType: 'customer',
+        type: 'DUE_COLLECTION',
+        amount: add,
+        paymentMethod: method,
+        date: todayStr,
+        invoiceNumber: invoice.invoiceNumber,
+        notes: `Due settlement for invoice ${invoice.invoiceNumber}`,
+        ownerId: user.uid,
+      };
+      setLedgerTransactions((prev) => [newTx, ...prev.filter((t) => t.id !== ledgerId)]);
+
       // Record in ledgerTransactions
       try {
-        const ledgerId = sanitizeDocId(`led_inv_${Date.now()}`);
         await setDoc(doc(db, 'ledgerTransactions', ledgerId), {
-          partyId: invoice.customerId || 'WALK_IN',
-          partyName: invoice.customerName,
-          partyType: 'customer',
-          type: 'DUE_COLLECTION',
-          amount: add,
-          paymentMethod: method,
-          date: new Date().toISOString().slice(0, 10),
-          invoiceNumber: invoice.invoiceNumber,
-          notes: `Due settlement for invoice ${invoice.invoiceNumber}`,
-          ownerId: user.uid,
+          ...newTx,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
@@ -1370,9 +1442,51 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
 
   const deleteSalesInvoice = async (invoiceId: string) => {
     if (!user) return;
+    const target = salesInvoices.find((inv) => inv.id === invoiceId);
     try {
-      await deleteDoc(doc(db, 'salesInvoices', invoiceId));
-      showToast('Sales invoice deleted', 'info');
+      const batch = writeBatch(db);
+      batch.delete(doc(db, 'salesInvoices', invoiceId));
+
+      if (target) {
+        // Restore stock for each garment line in itemsSummary
+        const parts = target.itemsSummary.split(' · ');
+        const stockAdjustments = new Map<string, number>();
+        parts.forEach((part) => {
+          const match = part.match(/^(\d+)x\s+(.+?)\s+\(([^)]+)\)\s+@/);
+          if (match) {
+            const qty = Number(match[1]) || 0;
+            const name = match[2].trim();
+            const size = match[3].trim();
+            const prod = products.find(
+              (p) => p.name.toLowerCase() === name.toLowerCase() && p.size === size
+            );
+            if (prod && qty > 0) {
+              stockAdjustments.set(prod.id, (stockAdjustments.get(prod.id) || prod.stock) + qty);
+            }
+          }
+        });
+        stockAdjustments.forEach((nextStock, prodId) => {
+          batch.update(doc(db, 'products', prodId), {
+            stock: nextStock,
+            updatedAt: serverTimestamp(),
+          });
+        });
+
+        // Reverse customer sales & due
+        if (target.customerId && target.customerId !== 'WALK_IN') {
+          const cust = customers.find((c) => c.id === target.customerId);
+          if (cust) {
+            batch.update(doc(db, 'customers', cust.id), {
+              totalSales: Math.max(0, cust.totalSales - target.grandTotal),
+              totalDue: Math.max(0, cust.totalDue - target.dueAmount),
+              updatedAt: serverTimestamp(),
+            });
+          }
+        }
+      }
+
+      await batch.commit();
+      showToast('Sales invoice deleted & stock/due reversed', 'info');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `salesInvoices/${invoiceId}`);
     }
@@ -1433,14 +1547,42 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
 
     const nextPayable = Math.max(0, sup.totalPayable - paid);
     const ledgerId = sanitizeDocId(`led_sup_${Date.now()}`);
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = getTodayBD();
 
     try {
+      const batch = writeBatch(db);
       // 1. Update supplier totalPayable
-      await updateDoc(doc(db, 'suppliers', supplierId), {
+      batch.update(doc(db, 'suppliers', supplierId), {
         totalPayable: nextPayable,
         updatedAt: serverTimestamp(),
       });
+
+      // 2. Allocate paid due FIFO across open purchaseInvoices for this supplier
+      const openPurchases = purchaseInvoices
+        .filter((pur) => pur.supplierId === supplierId && pur.dueAmount > 0)
+        .sort((a, b) => a.purchaseDate.localeCompare(b.purchaseDate) || a.id.localeCompare(b.id));
+
+      let remainingToAllocate = paid;
+      for (const pur of openPurchases) {
+        if (remainingToAllocate <= 0) break;
+        const alloc = Math.min(remainingToAllocate, pur.dueAmount);
+        if (alloc > 0) {
+          const initialPaid = getPurchaseInvoiceInitialPaid(pur, ledgerTransactions);
+          const nextPaid = pur.paidAmount + alloc;
+          const nextDue = Math.max(0, pur.totalAmount - nextPaid);
+          const nextStatus: PaymentStatus = nextDue === 0 ? 'Paid' : 'Partial';
+          batch.update(doc(db, 'purchaseInvoices', pur.id), {
+            initialPaidAmount: initialPaid,
+            paidAmount: nextPaid,
+            dueAmount: nextDue,
+            status: nextStatus,
+            updatedAt: serverTimestamp(),
+          });
+          remainingToAllocate -= alloc;
+        }
+      }
+
+      await batch.commit();
 
       const newTx: LedgerTransaction = {
         id: ledgerId,
@@ -1458,7 +1600,7 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
       // Optimistically add to state so UI updates instantly
       setLedgerTransactions((prev) => [newTx, ...prev.filter((t) => t.id !== ledgerId)]);
 
-      // 2. Persist to Firestore
+      // 3. Persist to Firestore
       try {
         await setDoc(doc(db, 'ledgerTransactions', ledgerId), {
           ...newTx,
@@ -1530,10 +1672,11 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
       itemsCount,
       totalAmount,
       paidAmount,
+      initialPaidAmount: paidAmount,
       dueAmount,
       paymentMethod: params.paymentMethod,
       status,
-      purchaseDate: params.purchaseDate.slice(0, 30) || new Date().toISOString().slice(0, 10),
+      purchaseDate: params.purchaseDate.slice(0, 30) || getTodayBD(),
       ownerId: user.uid,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -1547,6 +1690,9 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
         if (prod) {
           batch.update(doc(db, 'products', prod.id), {
             stock: Math.max(0, prod.stock + item.quantity),
+            ...(item.unitCost > 0 && item.unitCost !== prod.purchasePrice
+              ? { purchasePrice: item.unitCost }
+              : {}),
             updatedAt: serverTimestamp(),
           });
         }
@@ -1596,16 +1742,20 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
     const add = Math.min(purchase.dueAmount, Math.max(0, Number(additionalPaid) || 0));
     if (add <= 0) return;
 
+    const initialPaid = getPurchaseInvoiceInitialPaid(purchase, ledgerTransactions);
     const newPaid = purchase.paidAmount + add;
     const newDue = Math.max(0, purchase.totalAmount - newPaid);
     const newStatus: PaymentStatus = newDue === 0 ? 'Paid' : 'Partial';
+    const preservedPaymentMethod: PaymentMethod =
+      initialPaid > 0 ? purchase.paymentMethod : method;
 
     const batch = writeBatch(db);
     try {
       batch.update(doc(db, 'purchaseInvoices', purchase.id), {
+        initialPaidAmount: initialPaid,
         paidAmount: newPaid,
         dueAmount: newDue,
-        paymentMethod: method,
+        paymentMethod: preservedPaymentMethod,
         status: newStatus,
         updatedAt: serverTimestamp(),
       });
@@ -1621,20 +1771,27 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
       await batch.commit();
       showToast(`Paid supplier due on ${purchase.invoiceNumber}`);
 
+      const ledgerId = sanitizeDocId(`led_pur_${Date.now()}`);
+      const todayStr = getTodayBD();
+      const newTx: LedgerTransaction = {
+        id: ledgerId,
+        partyId: purchase.supplierId || 'GENERAL_SUPPLIER',
+        partyName: purchase.supplierName,
+        partyType: 'supplier',
+        type: 'DUE_PAYMENT',
+        amount: add,
+        paymentMethod: method,
+        date: todayStr,
+        invoiceNumber: purchase.invoiceNumber,
+        notes: `Due settlement for purchase invoice ${purchase.invoiceNumber}`,
+        ownerId: user.uid,
+      };
+      setLedgerTransactions((prev) => [newTx, ...prev.filter((t) => t.id !== ledgerId)]);
+
       // Record in ledgerTransactions
       try {
-        const ledgerId = sanitizeDocId(`led_pur_${Date.now()}`);
         await setDoc(doc(db, 'ledgerTransactions', ledgerId), {
-          partyId: purchase.supplierId || 'GENERAL_SUPPLIER',
-          partyName: purchase.supplierName,
-          partyType: 'supplier',
-          type: 'DUE_PAYMENT',
-          amount: add,
-          paymentMethod: method,
-          date: new Date().toISOString().slice(0, 10),
-          invoiceNumber: purchase.invoiceNumber,
-          notes: `Due settlement for purchase invoice ${purchase.invoiceNumber}`,
-          ownerId: user.uid,
+          ...newTx,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
@@ -1648,9 +1805,50 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
 
   const deletePurchaseInvoice = async (purchaseId: string) => {
     if (!user) return;
+    const target = purchaseInvoices.find((p) => p.id === purchaseId);
     try {
-      await deleteDoc(doc(db, 'purchaseInvoices', purchaseId));
-      showToast('Purchase invoice removed', 'info');
+      const batch = writeBatch(db);
+      batch.delete(doc(db, 'purchaseInvoices', purchaseId));
+
+      if (target) {
+        // Reverse stock addition for each garment line in itemsSummary
+        const parts = target.itemsSummary.split(' · ');
+        const stockAdjustments = new Map<string, number>();
+        parts.forEach((part) => {
+          const match = part.match(/^(\d+)x\s+(.+?)\s+\(([^)]+)\)\s+@/);
+          if (match) {
+            const qty = Number(match[1]) || 0;
+            const name = match[2].trim();
+            const size = match[3].trim();
+            const prod = products.find(
+              (p) => p.name.toLowerCase() === name.toLowerCase() && p.size === size
+            );
+            if (prod && qty > 0) {
+              const current = stockAdjustments.get(prod.id) ?? prod.stock;
+              stockAdjustments.set(prod.id, Math.max(0, current - qty));
+            }
+          }
+        });
+        stockAdjustments.forEach((nextStock, prodId) => {
+          batch.update(doc(db, 'products', prodId), {
+            stock: nextStock,
+            updatedAt: serverTimestamp(),
+          });
+        });
+
+        // Reverse supplier totals
+        const sup = suppliers.find((s) => s.id === target.supplierId);
+        if (sup) {
+          batch.update(doc(db, 'suppliers', sup.id), {
+            totalPurchased: Math.max(0, sup.totalPurchased - target.totalAmount),
+            totalPayable: Math.max(0, sup.totalPayable - target.dueAmount),
+            updatedAt: serverTimestamp(),
+          });
+        }
+      }
+
+      await batch.commit();
+      showToast('Purchase invoice removed & stock/payable reversed', 'info');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `purchaseInvoices/${purchaseId}`);
     }
@@ -1668,7 +1866,7 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
       category: data.category,
       amount: Math.max(0, Number(data.amount) || 0),
       paymentMethod: data.paymentMethod,
-      expenseDate: data.expenseDate.slice(0, 30) || new Date().toISOString().slice(0, 10),
+      expenseDate: data.expenseDate.slice(0, 30) || getTodayBD(),
       notes: data.notes.trim().slice(0, 250),
     };
 
@@ -1722,6 +1920,24 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
       currencySymbol: data.currencySymbol.trim().slice(0, 10) || '৳',
       invoiceFooterNote: data.invoiceFooterNote.trim().slice(0, 300),
       lowStockDefault: Math.max(0, Math.floor(Number(data.lowStockDefault) || 5)),
+      ...(data.securityPin !== undefined
+        ? { securityPin: String(data.securityPin).trim().slice(0, 20) || '1234' }
+        : {}),
+      ...(data.openingCash !== undefined
+        ? { openingCash: Number(data.openingCash) || 0 }
+        : {}),
+      ...(data.openingBkash !== undefined
+        ? { openingBkash: Number(data.openingBkash) || 0 }
+        : {}),
+      ...(data.openingNagad !== undefined
+        ? { openingNagad: Number(data.openingNagad) || 0 }
+        : {}),
+      ...(data.openingCard !== undefined
+        ? { openingCard: Number(data.openingCard) || 0 }
+        : {}),
+      ...(data.openingBank !== undefined
+        ? { openingBank: Number(data.openingBank) || 0 }
+        : {}),
     };
 
     try {
@@ -1775,6 +1991,7 @@ export function ErpProvider({ children }: { children: React.ReactNode }) {
         setPendingOrderForInvoice,
         pendingCartProducts,
         addPendingCartProduct,
+        removePendingCartProduct,
         clearPendingCartProducts,
         signInWithGoogle,
         signInWithEmail,

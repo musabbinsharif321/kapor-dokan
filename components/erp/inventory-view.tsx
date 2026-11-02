@@ -30,9 +30,10 @@ import {
 import { SingleProductQrModal } from './qr-views';
 import { QrCameraScannerModal } from './qr-camera-scanner-modal';
 
-function isSecurityCodeValid(input: string): boolean {
+function isSecurityCodeValid(input: string, configuredPin?: string): boolean {
   const cleaned = input.trim().toLowerCase();
-  return cleaned === 'confirm' || cleaned === '1234';
+  const activePin = (configuredPin || '1234').trim().toLowerCase();
+  return cleaned === activePin || cleaned === 'confirm';
 }
 
 export function InventoryHistoryView() {
@@ -86,7 +87,10 @@ export function InventoryHistoryView() {
         <div className="flex items-center gap-2">
           <select
             value={actionFilter}
-            onChange={(e) => setActionFilter(e.target.value as 'ALL' | 'EDIT' | 'DELETE')}
+            onChange={(e) => {
+              setActionFilter(e.target.value as 'ALL' | 'EDIT' | 'DELETE');
+              setHistoryPage(1);
+            }}
             className="min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 bg-white text-base sm:text-xs font-semibold text-slate-800"
           >
             <option value="ALL">All Logs (Edit & Delete)</option>
@@ -102,7 +106,10 @@ export function InventoryHistoryView() {
         <input
           type="text"
           value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          onChange={(e) => {
+            setSearchQuery(e.target.value);
+            setHistoryPage(1);
+          }}
           placeholder="Search logs by product name, SKU, category, or change details..."
           className="w-full min-h-[44px] pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-base sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-600"
         />
@@ -315,9 +322,9 @@ export function InventoryView() {
     if (!name.trim()) return;
 
     // Security confirmation gate when editing an existing product
-    if (editingProduct && !isSecurityCodeValid(editSecurityInput)) {
+    if (editingProduct && !isSecurityCodeValid(editSecurityInput, storeSettings.securityPin)) {
       setEditSecurityError(
-        'Please type CONFIRM or enter security code 1234 to authorize this edit.'
+        'Invalid Security PIN. Please enter your Store Security PIN to authorize this edit.'
       );
       return;
     }
@@ -347,9 +354,9 @@ export function InventoryView() {
   const handleConfirmDelete = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!deleteTargetProduct) return;
-    if (!isSecurityCodeValid(deleteSecurityInput)) {
+    if (!isSecurityCodeValid(deleteSecurityInput, storeSettings.securityPin)) {
       setDeleteSecurityError(
-        'Please type CONFIRM or enter security code 1234 to delete this item.'
+        'Invalid Security PIN. Please enter your Store Security PIN to delete this item.'
       );
       return;
     }
@@ -814,82 +821,7 @@ export function InventoryView() {
         </>
       )}
 
-      {/* 1. Add Custom Category Modal */}
-      {categoryModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <form
-            onSubmit={handleAddCategorySubmit}
-            className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl border border-slate-200 shadow-2xl overflow-hidden"
-          >
-            <div className="w-10 h-1.5 bg-slate-300 rounded-full mx-auto mt-3 sm:hidden" />
-            <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-slate-900 text-base">
-                  Add New Garment Category
-                </h3>
-                <p className="text-xs text-slate-500">
-                  New category will appear in the Inventory dropdown & product forms
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setCategoryModalOpen(false)}
-                className="min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-400"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-5 space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Category Name *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={newCategoryName}
-                  onChange={(e) => setNewCategoryName(e.target.value)}
-                  placeholder="e.g. Panjabi, Jacket, Blazer..."
-                  className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 text-base sm:text-sm text-slate-900"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Secondary / Sub-Label (Optional)
-                </label>
-                <input
-                  type="text"
-                  value={newCategoryBengali}
-                  onChange={(e) => setNewCategoryBengali(e.target.value)}
-                  placeholder="e.g. Traditional, Formal, Casual"
-                  className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-slate-200 text-base sm:text-sm text-slate-900"
-                />
-              </div>
-            </div>
-
-            <div className="p-4 bg-slate-50 border-t border-slate-200 flex gap-3">
-              <button
-                type="button"
-                onClick={() => setCategoryModalOpen(false)}
-                className="flex-1 min-h-[46px] rounded-xl border border-slate-300 bg-white text-slate-700 font-semibold text-sm"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={savingCategory}
-                className="flex-1 min-h-[46px] rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm disabled:opacity-50"
-              >
-                {savingCategory ? 'Adding...' : 'Save Category'}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* 2. Add / Edit Product Bottom Sheet (with Stock Update & Security Confirmation on Edit) */}
+      {/* Add / Edit Product Bottom Sheet (with Stock Update & Security Confirmation on Edit) */}
       {sheetOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
           <form
@@ -1086,19 +1018,17 @@ export function InventoryView() {
                     <span>Security Verification Required to Save Changes</span>
                   </div>
                   <p className="text-[11px] text-amber-800">
-                    To prevent accidental stock or price changes, type{' '}
-                    <strong className="font-mono">CONFIRM</strong> or enter security PIN{' '}
-                    <strong className="font-mono">1234</strong> below:
+                    Enter your Store Security PIN (configured in Settings) to authorize stock or price changes:
                   </p>
                   <input
-                    type="text"
+                    type="password"
                     required
                     value={editSecurityInput}
                     onChange={(e) => {
                       setEditSecurityInput(e.target.value);
                       if (editSecurityError) setEditSecurityError('');
                     }}
-                    placeholder="Type CONFIRM or 1234"
+                    placeholder="Enter Store Security PIN"
                     className="w-full min-h-[44px] px-3.5 py-2 rounded-xl border border-amber-300 bg-white text-base sm:text-sm font-mono text-slate-900"
                   />
                   {editSecurityError && (
@@ -1173,19 +1103,17 @@ export function InventoryView() {
 
               <div className="space-y-2">
                 <label className="block text-xs font-semibold text-slate-800">
-                  Type <span className="font-mono text-red-600">CONFIRM</span> or enter
-                  security PIN <span className="font-mono text-red-600">1234</span> to
-                  permanently delete:
+                  Enter your Store Security PIN to permanently delete:
                 </label>
                 <input
-                  type="text"
+                  type="password"
                   required
                   value={deleteSecurityInput}
                   onChange={(e) => {
                     setDeleteSecurityInput(e.target.value);
                     if (deleteSecurityError) setDeleteSecurityError('');
                   }}
-                  placeholder="Type CONFIRM or 1234"
+                  placeholder="Enter Store Security PIN"
                   className="w-full min-h-[46px] px-3.5 py-2 rounded-xl border border-slate-300 text-base sm:text-sm font-mono text-slate-900"
                 />
                 {deleteSecurityError && (
@@ -1308,7 +1236,12 @@ export function InventoryView() {
       <QrCameraScannerModal
         isOpen={scannerOpen}
         onClose={() => setScannerOpen(false)}
+        continuousMode={false}
+        allowOutOfStock={true}
         onScanItem={(product) => {
+          setSelectedCategoryFilter('All');
+          setLowStockOnly(false);
+          setProductPage(1);
           setSearchQuery(product.sku);
           setOpenMenuProductId(product.id);
         }}

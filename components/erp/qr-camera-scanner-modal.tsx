@@ -37,18 +37,22 @@ interface QrCameraScannerModalProps {
   onClose: () => void;
   // If provided, handles item scan directly (e.g. In POS Billing to add item to cart)
   onScanItem?: (product: Product) => void;
+  onRemoveItem?: (product: Product) => void;
   title?: string;
   subtitle?: string;
   continuousMode?: boolean; // If true, allows scanning multiple garments continuously
+  allowOutOfStock?: boolean; // If true, allows scanning 0-stock items (for Inventory Lookup & Restock)
 }
 
 export function QrCameraScannerModal({
   isOpen,
   onClose,
   onScanItem,
+  onRemoveItem,
   title = 'Mobile QR & Barcode Scanner',
   subtitle = 'Point camera at any garment QR sticker or paper receipt',
   continuousMode = true,
+  allowOutOfStock = false,
 }: QrCameraScannerModalProps) {
   const {
     products,
@@ -61,6 +65,7 @@ export function QrCameraScannerModal({
     setPendingOrderForInvoice,
     openReturnForInvoice,
     addPendingCartProduct,
+    removePendingCartProduct,
   } = useErp();
 
   const sym = storeSettings.currencySymbol || '৳';
@@ -109,6 +114,11 @@ export function QrCameraScannerModal({
     onScanItemRef.current = onScanItem;
   }, [onScanItem]);
 
+  const onRemoveItemRef = useRef(onRemoveItem);
+  useEffect(() => {
+    onRemoveItemRef.current = onRemoveItem;
+  }, [onRemoveItem]);
+
   const sessionItemsRef = useRef(sessionItems);
   useEffect(() => {
     sessionItemsRef.current = sessionItems;
@@ -144,12 +154,15 @@ export function QrCameraScannerModal({
       setScannedResult(parsed);
 
       // Search in Database using fresh refs
-      const foundProduct = productsRef.current.find(
-        (p) =>
-          p.sku.toLowerCase() === parsed.identifier.toLowerCase() ||
-          p.id.toLowerCase() === parsed.identifier.toLowerCase() ||
-          decodedText.toLowerCase().includes(p.sku.toLowerCase())
-      );
+      const foundProduct =
+        parsed.type === 'PRODUCT'
+          ? productsRef.current.find(
+              (p) =>
+                p.sku.toLowerCase() === parsed.identifier.toLowerCase() ||
+                p.id.toLowerCase() === parsed.identifier.toLowerCase() ||
+                p.sku.toLowerCase() === decodedText.trim().toLowerCase()
+            )
+          : undefined;
 
       const foundInvoice = salesInvoicesRef.current.find(
         (inv) =>
@@ -168,14 +181,14 @@ export function QrCameraScannerModal({
       setMatchedOrder(foundOrder || null);
 
       if (foundProduct) {
-        if (foundProduct.stock <= 0) {
+        if (!allowOutOfStock && foundProduct.stock <= 0) {
           setLastScannedFeedback(`Out of stock: ${foundProduct.name} (0 pcs)`);
           showToast(`Out of stock: ${foundProduct.name} has 0 pcs in stock`, 'error');
           return;
         }
 
         const existingSession = sessionItemsRef.current.find((i) => i.product.id === foundProduct.id);
-        if (existingSession && existingSession.quantity >= foundProduct.stock) {
+        if (!allowOutOfStock && existingSession && existingSession.quantity >= foundProduct.stock) {
           setLastScannedFeedback(`Max stock reached (${foundProduct.stock} pcs max)`);
           showToast(
             `Cannot add more: Only ${foundProduct.stock} pcs in stock for ${foundProduct.name}`,
@@ -191,7 +204,8 @@ export function QrCameraScannerModal({
           const idx = prev.findIndex((i) => i.product.id === foundProduct.id);
           if (idx >= 0) {
             const next = [...prev];
-            next[idx] = { ...next[idx], quantity: Math.min(foundProduct.stock, next[idx].quantity + 1) };
+            const maxAllowed = allowOutOfStock ? 9999 : foundProduct.stock;
+            next[idx] = { ...next[idx], quantity: Math.min(maxAllowed, next[idx].quantity + 1) };
             return next;
           }
           return [{ product: foundProduct, quantity: 1 }, ...prev];
@@ -204,7 +218,12 @@ export function QrCameraScannerModal({
           addPendingCartProduct(foundProduct);
         }
 
-        showToast(`Added: ${foundProduct.name} (${foundProduct.size})`, 'success');
+        showToast(
+          allowOutOfStock
+            ? `Scanned: ${foundProduct.name} (${foundProduct.size})`
+            : `Added: ${foundProduct.name} (${foundProduct.size})`,
+          'success'
+        );
 
         // In single-scan mode, close modal after short delay
         if (!continuousMode) {
@@ -217,7 +236,7 @@ export function QrCameraScannerModal({
         setLastScannedFeedback(`Unrecognized code: ${parsed.identifier}`);
       }
     },
-    [addPendingCartProduct, continuousMode, onClose, showToast]
+    [addPendingCartProduct, allowOutOfStock, continuousMode, onClose, showToast]
   );
 
   // Keep a stable ref to handleDecodedString so camera listener never breaks
@@ -232,20 +251,27 @@ export function QrCameraScannerModal({
       const idx = prev.findIndex((i) => i.product.id === productId);
       if (idx < 0) return prev;
       const target = prev[idx];
-      if (delta > 0 && target.quantity >= target.product.stock) {
+      if (!allowOutOfStock && delta > 0 && target.quantity >= target.product.stock) {
         showToast(
           `Cannot add more: Only ${target.product.stock} pcs in stock for ${target.product.name}`,
           'error'
         );
         return prev;
       }
-      const newQty = Math.min(target.product.stock, target.quantity + delta);
+      const maxAllowed = allowOutOfStock ? 9999 : target.product.stock;
+      const newQty = Math.min(maxAllowed, target.quantity + delta);
 
       if (delta > 0) {
         if (onScanItemRef.current) {
           onScanItemRef.current(target.product);
         } else {
           addPendingCartProduct(target.product);
+        }
+      } else if (delta < 0) {
+        if (onRemoveItemRef.current) {
+          onRemoveItemRef.current(target.product);
+        } else {
+          removePendingCartProduct(target.product.id);
         }
       }
 
@@ -258,7 +284,7 @@ export function QrCameraScannerModal({
     });
   };
 
-  // Initialize camera scanner when modal opens (ONLY depends on isOpen and selectedCameraId)
+  // Initialize camera scanner when modal opens (ONLY depends on isOpen)
   useEffect(() => {
     if (!isOpen) {
       setScannedResult(null);
@@ -309,10 +335,11 @@ export function QrCameraScannerModal({
                 d.label.toLowerCase().includes('rear') ||
                 d.label.toLowerCase().includes('environment')
             ) || devices[0];
-          setSelectedCameraId(backCam.id);
+          const camIdToUse = selectedCameraId || backCam.id;
+          setSelectedCameraId(camIdToUse);
 
           await html5QrCodeInstance.start(
-            selectedCameraId || backCam.id,
+            camIdToUse,
             {
               fps: 15,
               qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
@@ -383,7 +410,8 @@ export function QrCameraScannerModal({
         scannerRef.current = null;
       }
     };
-  }, [isOpen, selectedCameraId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   // Switch camera
   const handleSwitchCamera = async () => {
@@ -397,6 +425,23 @@ export function QrCameraScannerModal({
       const nextIndex = (currentIndex + 1) % cameras.length;
       const nextCamera = cameras[nextIndex];
       setSelectedCameraId(nextCamera.id);
+      await scanner.start(
+        nextCamera.id,
+        {
+          fps: 15,
+          qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+            const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+            const edge = Math.floor(minEdge * 0.75);
+            return { width: edge, height: edge };
+          },
+          aspectRatio: 1.0,
+        },
+        (decodedText: string) => {
+          handleDecodedStringRef.current(decodedText);
+        },
+        () => {}
+      );
+      setCameraActive(true);
     } catch (err: any) {
       console.error('Failed to switch camera:', err);
     }

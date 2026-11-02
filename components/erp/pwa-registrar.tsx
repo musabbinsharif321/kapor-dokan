@@ -40,6 +40,15 @@ export function PwaRegistrar() {
       return;
     }
 
+    try {
+      const dismissedAt = Number(localStorage.getItem('nextfit_pwa_dismissed_at') || 0);
+      if (dismissedAt && Date.now() - dismissedAt < 24 * 60 * 60 * 1000) {
+        return;
+      }
+    } catch {
+      // Ignore storage access errors
+    }
+
     // Detect iPhone / iPad / iPod
     const isAppleIos =
       /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase()) ||
@@ -119,7 +128,14 @@ export function PwaRegistrar() {
             </p>
           </div>
           <button
-            onClick={() => setShowBanner(false)}
+            onClick={() => {
+              try {
+                localStorage.setItem('nextfit_pwa_dismissed_at', String(Date.now()));
+              } catch {
+                // Ignore
+              }
+              setShowBanner(false);
+            }}
             className="min-h-[32px] min-w-[32px] flex items-center justify-center text-slate-400 hover:text-white rounded-lg"
             aria-label="Dismiss banner"
           >
@@ -138,7 +154,14 @@ export function PwaRegistrar() {
           </button>
           <button
             type="button"
-            onClick={() => setShowBanner(false)}
+            onClick={() => {
+              try {
+                localStorage.setItem('nextfit_pwa_dismissed_at', String(Date.now()));
+              } catch {
+                // Ignore
+              }
+              setShowBanner(false);
+            }}
             className="min-h-[38px] px-3 rounded-xl border border-slate-700 bg-slate-800 text-slate-300 text-xs font-medium cursor-pointer"
           >
             Later

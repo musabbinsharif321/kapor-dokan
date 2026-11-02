@@ -9,6 +9,7 @@ import {
   CustomerView,
   SalesOrderView,
   SalesInvoiceView,
+  ReturnsView,
 } from '@/components/erp/sales-views';
 import {
   SupplierView,
@@ -372,6 +373,7 @@ function ErpWorkspaceRouter() {
       {activeModule === 'sales-customer' && <CustomerView />}
       {activeModule === 'sales-order' && <SalesOrderView />}
       {activeModule === 'sales-invoice' && <SalesInvoiceView />}
+      {activeModule === 'sales-returns' && <ReturnsView />}
       {activeModule === 'purchase-supplier' && <SupplierView />}
       {activeModule === 'purchase-invoice' && <PurchaseInvoiceView />}
       {activeModule === 'daily-expenses' && <DailyExpensesView />}

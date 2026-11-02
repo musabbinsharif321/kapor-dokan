@@ -29,13 +29,17 @@ import { QrCameraScannerModal } from './qr-camera-scanner-modal';
 import {
   Customer,
   SalesOrder,
+  SalesOrderItem,
   SalesInvoice,
   OrderStatus,
   PaymentMethod,
   PAYMENT_METHODS,
   GARMENT_CATEGORIES,
+  GarmentSize,
   ReturnType,
   formatBDT,
+  getTodayBD,
+  getSalesInvoiceInitialPaid,
 } from '@/lib/types';
 
 /* ============================================================================
@@ -308,7 +312,15 @@ export function CustomerView() {
                       <span>Edit</span>
                     </button>
                     <button
-                      onClick={() => deleteCustomer(c.id)}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `Delete customer "${c.name}"? Their historical invoices will remain, but the customer account will be removed.`
+                          )
+                        ) {
+                          deleteCustomer(c.id);
+                        }
+                      }}
                       className="min-h-[40px] min-w-[40px] rounded-xl border border-slate-200 text-slate-400 hover:text-red-600 flex items-center justify-center"
                       title="Delete Customer"
                     >
@@ -589,25 +601,28 @@ function CustomerLedgerModal({
   }
 
   const combinedLedger: LedgerItem[] = [
-    ...customerInvoices.map((inv): LedgerItem => ({
-      id: inv.id,
-      date: inv.invoiceDate,
-      type: 'INVOICE',
-      title: `Invoice ${inv.invoiceNumber}`,
-      subtitle: `${inv.itemsCount} pcs · ${inv.primaryCategory}`,
-      details: inv.itemsSummary,
-      debit: inv.grandTotal,
-      credit: inv.paidAmount,
-      paymentMethod: inv.paymentMethod,
-      statusBadge: inv.status,
-      statusColor:
-        inv.status === 'Paid'
-          ? 'bg-emerald-100 text-emerald-800'
-          : inv.status === 'Partial'
-          ? 'bg-amber-100 text-amber-800'
-          : 'bg-red-100 text-red-800',
-      rawInvoice: inv,
-    })),
+    ...customerInvoices.map((inv): LedgerItem => {
+      const initialPaid = getSalesInvoiceInitialPaid(inv, ledgerTransactions);
+      return {
+        id: inv.id,
+        date: inv.invoiceDate,
+        type: 'INVOICE',
+        title: `Invoice ${inv.invoiceNumber}`,
+        subtitle: `${inv.itemsCount} pcs · ${inv.primaryCategory}`,
+        details: inv.itemsSummary,
+        debit: inv.grandTotal,
+        credit: initialPaid,
+        paymentMethod: inv.paymentMethod,
+        statusBadge: inv.status,
+        statusColor:
+          inv.status === 'Paid'
+            ? 'bg-emerald-100 text-emerald-800'
+            : inv.status === 'Partial'
+            ? 'bg-amber-100 text-amber-800'
+            : 'bg-red-100 text-red-800',
+        rawInvoice: inv,
+      };
+    }),
     ...customerPayments.map((p): LedgerItem => ({
       id: p.id,
       date: p.date,
@@ -619,10 +634,13 @@ function CustomerLedgerModal({
       statusBadge: 'Received',
       statusColor: 'bg-emerald-100 text-emerald-800',
     })),
-  ].sort((a, b) => b.date.localeCompare(a.date));
+  ].sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
 
   const totalBilled = customerInvoices.reduce((acc, i) => acc + i.grandTotal, 0);
-  const totalPaidDirect = customerInvoices.reduce((acc, i) => acc + i.paidAmount, 0);
+  const totalPaidDirect = customerInvoices.reduce(
+    (acc, i) => acc + getSalesInvoiceInitialPaid(i, ledgerTransactions),
+    0
+  );
   const totalDuePayments = customerPayments.reduce((acc, p) => acc + p.amount, 0);
   const totalPaid = totalPaidDirect + totalDuePayments;
   const currentDue = customer.totalDue;
@@ -865,12 +883,17 @@ export function SalesOrderView() {
   } = useErp();
 
   const [statusFilter, setStatusFilter] = useState<string>('All');
+  const [orderSearch, setOrderSearch] = useState('');
+  const [orderPage, setOrderPage] = useState(1);
+  const orderPageSize = 8;
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [editingOrder, setEditingOrder] = useState<SalesOrder | null>(null);
 
   const [customerId, setCustomerId] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [selectedProdId, setSelectedProdId] = useState('');
   const [orderQty, setOrderQty] = useState('2');
+  const [orderItems, setOrderItems] = useState<SalesOrderItem[]>([]);
   const [itemsSummary, setItemsSummary] = useState('');
   const [itemsCount, setItemsCount] = useState('2');
   const [totalAmount, setTotalAmount] = useState('0');
@@ -878,6 +901,7 @@ export function SalesOrderView() {
   const sym = storeSettings.currencySymbol || '৳';
 
   const openNewOrder = () => {
+    setEditingOrder(null);
     const firstCust = customers[0];
     setCustomerId(firstCust?.id || 'WALK_IN');
     setCustomerName(firstCust?.name || 'Walk-in Customer');
@@ -885,10 +909,23 @@ export function SalesOrderView() {
     setSelectedProdId(firstProd?.id || '');
     setOrderQty('2');
     if (firstProd) {
+      const initialItem: SalesOrderItem = {
+        productId: firstProd.id,
+        name: firstProd.name,
+        sku: firstProd.sku,
+        category: firstProd.category,
+        size: firstProd.size,
+        color: firstProd.color,
+        unitPrice: firstProd.sellingPrice,
+        unitCost: firstProd.purchasePrice,
+        quantity: 2,
+      };
+      setOrderItems([initialItem]);
       setItemsSummary(`2x ${firstProd.name} (${firstProd.size})`);
       setItemsCount('2');
       setTotalAmount(String(firstProd.sellingPrice * 2));
     } else {
+      setOrderItems([]);
       setItemsSummary('');
       setItemsCount('1');
       setTotalAmount('0');
@@ -897,11 +934,47 @@ export function SalesOrderView() {
     setSheetOpen(true);
   };
 
+  const openEditOrder = (order: SalesOrder) => {
+    setEditingOrder(order);
+    setCustomerId(order.customerId || 'WALK_IN');
+    setCustomerName(order.customerName || 'Walk-in Customer');
+    setSelectedProdId(products[0]?.id || '');
+    setOrderQty('1');
+    setOrderItems(order.items || []);
+    setItemsSummary(order.itemsSummary);
+    setItemsCount(String(order.itemsCount));
+    setTotalAmount(String(order.totalAmount));
+    setNotes(order.notes || '');
+    setSheetOpen(true);
+  };
+
   const handleQuickAddItemToSummary = () => {
     const prod = products.find((p) => p.id === selectedProdId);
     if (!prod) return;
     const q = Math.max(1, Number(orderQty) || 1);
     const segment = `${q}x ${prod.name} (${prod.size})`;
+    setOrderItems((prev) => {
+      const existing = prev.find((i) => i.productId === prod.id);
+      if (existing) {
+        return prev.map((i) =>
+          i.productId === prod.id ? { ...i, quantity: i.quantity + q } : i
+        );
+      }
+      return [
+        ...prev,
+        {
+          productId: prod.id,
+          name: prod.name,
+          sku: prod.sku,
+          category: prod.category,
+          size: prod.size,
+          color: prod.color,
+          unitPrice: prod.sellingPrice,
+          unitCost: prod.purchasePrice,
+          quantity: q,
+        },
+      ];
+    });
     setItemsSummary((prev) => (prev ? `${prev} · ${segment}` : segment));
     setItemsCount((prev) => String((Number(prev) || 0) + q));
     setTotalAmount((prev) => String((Number(prev) || 0) + prod.sellingPrice * q));
@@ -909,18 +982,24 @@ export function SalesOrderView() {
 
   const handleCreateOrder = async (e: React.FormEvent) => {
     e.preventDefault();
-    await saveSalesOrder({
-      orderNumber: `SO-${Date.now().toString().slice(-4)}`,
-      customerId: customerId || 'WALK_IN',
-      customerName: customerName || 'Walk-in Customer',
-      itemsSummary: itemsSummary || 'Assorted Garments',
-      itemsCount: Math.max(1, Number(itemsCount) || 1),
-      totalAmount: Math.max(0, Number(totalAmount) || 0),
-      status: 'Pending',
-      orderDate: new Date().toISOString().slice(0, 10),
-      notes,
-    });
+    await saveSalesOrder(
+      {
+        orderNumber:
+          editingOrder?.orderNumber || `SO-${Date.now().toString().slice(-4)}`,
+        customerId: customerId || 'WALK_IN',
+        customerName: customerName || 'Walk-in Customer',
+        itemsSummary: itemsSummary || 'Assorted Garments',
+        itemsCount: Math.max(1, Number(itemsCount) || 1),
+        totalAmount: Math.max(0, Number(totalAmount) || 0),
+        status: editingOrder?.status || 'Pending',
+        orderDate: editingOrder?.orderDate || getTodayBD(),
+        notes,
+        items: orderItems.length > 0 ? orderItems : undefined,
+      },
+      editingOrder?.id
+    );
     setSheetOpen(false);
+    setEditingOrder(null);
   };
 
   const handleConvertToInvoice = (order: SalesOrder) => {
@@ -928,8 +1007,22 @@ export function SalesOrderView() {
     setActiveModule('sales-invoice');
   };
 
-  const filtered = salesOrders.filter(
-    (o) => statusFilter === 'All' || o.status === statusFilter
+  const filtered = salesOrders.filter((o) => {
+    const matchesStatus = statusFilter === 'All' || o.status === statusFilter;
+    const q = orderSearch.trim().toLowerCase();
+    const matchesSearch =
+      !q ||
+      o.orderNumber.toLowerCase().includes(q) ||
+      o.customerName.toLowerCase().includes(q) ||
+      o.itemsSummary.toLowerCase().includes(q) ||
+      (o.notes && o.notes.toLowerCase().includes(q));
+    return matchesStatus && matchesSearch;
+  });
+
+  const totalOrderPages = Math.max(1, Math.ceil(filtered.length / orderPageSize));
+  const pagedOrders = filtered.slice(
+    (orderPage - 1) * orderPageSize,
+    orderPage * orderPageSize
   );
 
   return (
@@ -952,24 +1045,55 @@ export function SalesOrderView() {
         </button>
       </div>
 
-      {/* Status Filter Tabs */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-        {['All', 'Pending', 'Confirmed', 'Invoiced', 'Cancelled'].map((st) => (
-          <button
-            key={st}
-            onClick={() => setStatusFilter(st)}
-            className={`min-h-[40px] px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
-              statusFilter === st
-                ? 'bg-slate-900 text-white'
-                : 'bg-white text-slate-600 border border-slate-200 hover:text-slate-900'
-            }`}
-          >
-            {st}
-          </button>
-        ))}
+      {/* Search & Status Filter Tabs */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            type="text"
+            value={orderSearch}
+            onChange={(e) => {
+              setOrderSearch(e.target.value);
+              setOrderPage(1);
+            }}
+            placeholder="Search order #, customer name, or garment..."
+            className="w-full min-h-[42px] pl-10 pr-9 py-2 bg-white border border-slate-200 rounded-xl text-base sm:text-xs"
+          />
+          {orderSearch && (
+            <button
+              type="button"
+              onClick={() => {
+                setOrderSearch('');
+                setOrderPage(1);
+              }}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+          {['All', 'Pending', 'Confirmed', 'Invoiced', 'Cancelled'].map((st) => (
+            <button
+              key={st}
+              onClick={() => {
+                setStatusFilter(st);
+                setOrderPage(1);
+              }}
+              className={`min-h-[40px] px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                statusFilter === st
+                  ? 'bg-slate-900 text-white'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:text-slate-900'
+              }`}
+            >
+              {st}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {filtered.length === 0 ? (
+      {pagedOrders.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center space-y-3">
           <ClipboardList className="w-8 h-8 text-slate-400 mx-auto" />
           <p className="text-sm font-bold text-slate-900">No Sales Orders Found</p>
@@ -982,7 +1106,7 @@ export function SalesOrderView() {
         </div>
       ) : (
         <div className="space-y-3">
-          {filtered.map((order) => (
+          {pagedOrders.map((order) => (
             <div
               key={order.id}
               className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 flex flex-col justify-between gap-4"
@@ -1049,6 +1173,15 @@ export function SalesOrderView() {
                 </div>
 
                 <div className="flex items-center gap-2">
+                  {order.status !== 'Invoiced' && (
+                    <button
+                      onClick={() => openEditOrder(order)}
+                      className="min-h-[40px] px-3 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-1.5"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>Edit</span>
+                    </button>
+                  )}
                   {(order.status === 'Pending' || order.status === 'Confirmed') && (
                     <button
                       onClick={() => updateSalesOrderStatus(order.id, 'Cancelled')}
@@ -1058,7 +1191,11 @@ export function SalesOrderView() {
                     </button>
                   )}
                   <button
-                    onClick={() => deleteSalesOrder(order.id)}
+                    onClick={() => {
+                      if (window.confirm(`Delete sales order ${order.orderNumber}?`)) {
+                        deleteSalesOrder(order.id);
+                      }
+                    }}
                     className="min-h-[40px] min-w-[40px] rounded-xl border border-slate-200 text-slate-400 hover:text-red-600 flex items-center justify-center"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -1067,10 +1204,41 @@ export function SalesOrderView() {
               </div>
             </div>
           ))}
+
+          {totalOrderPages > 1 && (
+            <div className="bg-white rounded-2xl border border-slate-200 p-3.5 flex items-center justify-between gap-2 text-xs">
+              <span className="text-slate-500 font-mono">
+                Page {orderPage} of {totalOrderPages} ({filtered.length} orders)
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={orderPage <= 1}
+                  onClick={() => setOrderPage((p) => Math.max(1, p - 1))}
+                  className="min-h-[38px] min-w-[38px] px-3 rounded-xl border border-slate-200 bg-white font-semibold text-slate-700 disabled:opacity-40 flex items-center justify-center gap-1"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  <span className="hidden sm:inline">Prev</span>
+                </button>
+                <div className="px-2 font-mono font-bold text-slate-800">
+                  {orderPage} / {totalOrderPages}
+                </div>
+                <button
+                  type="button"
+                  disabled={orderPage >= totalOrderPages}
+                  onClick={() => setOrderPage((p) => Math.min(totalOrderPages, p + 1))}
+                  className="min-h-[38px] min-w-[38px] px-3 rounded-xl border border-slate-200 bg-white font-semibold text-slate-700 disabled:opacity-40 flex items-center justify-center gap-1"
+                >
+                  <span className="hidden sm:inline">Next</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* New Sales Order Bottom Sheet */}
+      {/* New / Edit Sales Order Bottom Sheet */}
       {sheetOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
           <form
@@ -1079,10 +1247,17 @@ export function SalesOrderView() {
           >
             <div className="w-10 h-1.5 bg-slate-300 rounded-full mx-auto mt-3 sm:hidden" />
             <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
-              <h3 className="font-bold text-slate-900 text-base">Create Sales Order</h3>
+              <h3 className="font-bold text-slate-900 text-base">
+                {editingOrder
+                  ? `Edit Sales Order ${editingOrder.orderNumber}`
+                  : 'Create Sales Order'}
+              </h3>
               <button
                 type="button"
-                onClick={() => setSheetOpen(false)}
+                onClick={() => {
+                  setSheetOpen(false);
+                  setEditingOrder(null);
+                }}
                 className="min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-400"
               >
                 <X className="w-5 h-5" />
@@ -1338,15 +1513,83 @@ export function SalesInvoiceView() {
   };
 
   useEffect(() => {
-    if (!pendingReturnInvoice) return;
-    const timer = setTimeout(() => {
-      populateReturnFromInvoice(pendingReturnInvoice);
-      setReturnModalOpen(true);
-      setPendingReturnInvoice(null);
-    }, 0);
-    return () => clearTimeout(timer);
+    if (!pendingOrderForInvoice) return;
+    setCustomerId(pendingOrderForInvoice.customerId || 'WALK_IN');
+    setCustomerName(pendingOrderForInvoice.customerName || 'Walk-in Customer');
+    const foundCust = customers.find((c) => c.id === pendingOrderForInvoice.customerId);
+    setCustomerPhone(foundCust?.phone || '');
+
+    // Auto-populate cart items from structured order items or parse itemsSummary
+    const nextCart: CartLineItem[] = [];
+    if (pendingOrderForInvoice.items && pendingOrderForInvoice.items.length > 0) {
+      pendingOrderForInvoice.items.forEach((item) => {
+        const liveProd = products.find((p) => p.id === item.productId);
+        const maxQty = liveProd ? Math.max(0, liveProd.stock) : item.quantity;
+        if (maxQty > 0) {
+          nextCart.push({
+            productId: item.productId,
+            name: liveProd?.name || item.name,
+            sku: liveProd?.sku || item.sku,
+            category: liveProd?.category || item.category,
+            size: (liveProd?.size || item.size) as GarmentSize,
+            color: liveProd?.color || item.color,
+            unitPrice: liveProd?.sellingPrice ?? item.unitPrice,
+            unitCost: liveProd?.purchasePrice ?? item.unitCost,
+            quantity: Math.min(maxQty, item.quantity),
+          });
+        }
+      });
+    } else if (pendingOrderForInvoice.itemsSummary) {
+      const segments = pendingOrderForInvoice.itemsSummary.split('·').map((s) => s.trim());
+      segments.forEach((seg) => {
+        const match = seg.match(/^(\d+)x\s+(.+?)(?:\s+\(([^)]+)\))?$/i);
+        if (match) {
+          const qty = Math.max(1, Number(match[1]) || 1);
+          const prodName = match[2].trim().toLowerCase();
+          const sizeHint = match[3]?.trim().toLowerCase();
+          const matchedProd =
+            products.find(
+              (p) =>
+                p.name.toLowerCase() === prodName &&
+                (!sizeHint || p.size.toLowerCase() === sizeHint) &&
+                p.stock > 0
+            ) ||
+            products.find((p) => p.name.toLowerCase().includes(prodName) && p.stock > 0);
+          if (matchedProd) {
+            const existing = nextCart.find((c) => c.productId === matchedProd.id);
+            const allowedQty = Math.min(matchedProd.stock, (existing?.quantity || 0) + qty);
+            if (existing) {
+              existing.quantity = allowedQty;
+            } else if (allowedQty > 0) {
+              nextCart.push({
+                productId: matchedProd.id,
+                name: matchedProd.name,
+                sku: matchedProd.sku,
+                category: matchedProd.category,
+                size: matchedProd.size,
+                color: matchedProd.color,
+                unitPrice: matchedProd.sellingPrice,
+                unitCost: matchedProd.purchasePrice,
+                quantity: allowedQty,
+              });
+            }
+          }
+        }
+      });
+    }
+
+    if (nextCart.length > 0) {
+      setCart(nextCart);
+      const nextSub = nextCart.reduce((acc, i) => acc + i.unitPrice * i.quantity, 0);
+      setDiscount('0');
+      setPaidAmount(String(nextSub));
+      showToast(
+        `Loaded ${nextCart.length} item(s) from Order ${pendingOrderForInvoice.orderNumber}`,
+        'info'
+      );
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingReturnInvoice]);
+  }, [pendingOrderForInvoice]);
 
   useEffect(() => {
     if (pendingCartProducts.length > 0) {
@@ -1654,7 +1897,7 @@ export function SalesInvoiceView() {
         discount: numDiscount,
         paidAmount: numPaid,
         paymentMethod,
-        invoiceDate: new Date().toISOString().slice(0, 10),
+        invoiceDate: getTodayBD(),
         linkedOrderId: pendingOrderForInvoice?.id,
       });
       setCart([]);
@@ -1986,7 +2229,11 @@ export function SalesInvoiceView() {
                 type="number"
                 min="0"
                 value={discount}
-                onChange={(e) => setDiscount(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setDiscount(val);
+                  syncPaidWithCart(cart, val);
+                }}
                 className="w-full min-h-[42px] px-3 py-2 rounded-xl border border-slate-200 text-base sm:text-xs font-mono tabular-nums"
               />
             </div>
@@ -2011,7 +2258,7 @@ export function SalesInvoiceView() {
             <label className="block text-xs font-semibold text-slate-700 mb-1.5">
               Payment Method
             </label>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
               {PAYMENT_METHODS.map((m) => (
                 <button
                   type="button"
@@ -2226,7 +2473,15 @@ export function SalesInvoiceView() {
                     <span>Receipt</span>
                   </button>
                   <button
-                    onClick={() => deleteSalesInvoice(inv.id)}
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `Delete Invoice ${inv.invoiceNumber}? Stock and customer balances will be automatically reversed.`
+                        )
+                      ) {
+                        deleteSalesInvoice(inv.id);
+                      }
+                    }}
                     className="min-h-[38px] min-w-[38px] rounded-xl border border-slate-200 text-slate-400 hover:text-red-600 flex items-center justify-center"
                     title="Delete Invoice"
                   >
@@ -2306,7 +2561,7 @@ export function SalesInvoiceView() {
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Payment Method
                 </label>
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
                   {PAYMENT_METHODS.map((m) => (
                     <button
                       type="button"
@@ -2348,6 +2603,7 @@ export function SalesInvoiceView() {
         isOpen={cameraScannerOpen}
         onClose={() => setCameraScannerOpen(false)}
         onScanItem={(product) => addToCart(product.id)}
+        onRemoveItem={(product) => updateCartQty(product.id, -1)}
         continuousMode={true}
         title="POS Garment Tag Scanner"
         subtitle="Point camera at clothing barcode/QR sticker to add to cart"
@@ -2569,9 +2825,19 @@ export function ReturnsView() {
       alert('Please select the item being returned.');
       return;
     }
-    if (type === 'EXCHANGE' && !exchangeProductId) {
-      alert('Please select the replacement exchange item.');
-      return;
+    if (type === 'EXCHANGE') {
+      if (!exchangeProductId) {
+        alert('Please select the replacement exchange item.');
+        return;
+      }
+      const exProdCheck = products.find((p) => p.id === exchangeProductId);
+      const reqExQty = Math.max(1, Number(exchangeQty) || 1);
+      if (exProdCheck && exProdCheck.stock < reqExQty) {
+        alert(
+          `Insufficient stock for replacement item "${exProdCheck.name}": only ${exProdCheck.stock} pcs available.`
+        );
+        return;
+      }
     }
 
     setProcessing(true);
@@ -3179,8 +3445,8 @@ export function ReturnsView() {
                     >
                       <option value="">-- Select Replacement SKU --</option>
                       {exchangeCandidateProducts.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} ({p.category}) - Size: {p.size}, Color: {p.color} [Price: {sym}{p.sellingPrice}, Stock: {p.stock}]
+                        <option key={p.id} value={p.id} disabled={p.stock <= 0}>
+                          {p.name} ({p.category}) - Size: {p.size}, Color: {p.color} [Price: {sym}{p.sellingPrice}, Stock: {p.stock}{p.stock <= 0 ? ' - OUT OF STOCK' : ''}]
                         </option>
                       ))}
                     </select>
@@ -3245,7 +3511,7 @@ export function ReturnsView() {
                       <label className="block font-semibold text-slate-700 mb-1 text-xs">
                         Extra Charge Payment Method
                       </label>
-                      <div className="grid grid-cols-4 gap-2 font-sans text-xs">
+                      <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 font-sans text-xs">
                         {PAYMENT_METHODS.map((m) => (
                           <button
                             key={m}

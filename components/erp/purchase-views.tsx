@@ -27,6 +27,8 @@ import {
   PAYMENT_METHODS,
   GARMENT_CATEGORIES,
   formatBDT,
+  getTodayBD,
+  getPurchaseInvoiceInitialPaid,
 } from '@/lib/types';
 
 /* ============================================================================
@@ -307,7 +309,15 @@ export function SupplierView() {
                       <span>Edit</span>
                     </button>
                     <button
-                      onClick={() => deleteSupplier(s.id)}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `Delete supplier "${s.companyName}"? Their historical purchase invoices will remain, but the supplier account will be removed.`
+                          )
+                        ) {
+                          deleteSupplier(s.id);
+                        }
+                      }}
                       className="min-h-[40px] min-w-[40px] rounded-xl border border-slate-200 text-slate-400 hover:text-red-600 flex items-center justify-center"
                       title="Delete Supplier"
                     >
@@ -601,25 +611,28 @@ function SupplierLedgerModal({
   }
 
   const combinedLedger: SupplierLedgerItem[] = [
-    ...supplierInvoices.map((inv): SupplierLedgerItem => ({
-      id: inv.id,
-      date: inv.purchaseDate,
-      type: 'INVOICE',
-      title: `Purchase ${inv.invoiceNumber}`,
-      subtitle: `${inv.itemsCount} pcs`,
-      details: inv.itemsSummary,
-      debit: inv.totalAmount,
-      credit: inv.paidAmount,
-      paymentMethod: inv.paymentMethod,
-      statusBadge: inv.status,
-      statusColor:
-        inv.status === 'Paid'
-          ? 'bg-emerald-100 text-emerald-800'
-          : inv.status === 'Partial'
-          ? 'bg-amber-100 text-amber-800'
-          : 'bg-red-100 text-red-800',
-      rawInvoice: inv,
-    })),
+    ...supplierInvoices.map((inv): SupplierLedgerItem => {
+      const initialPaid = getPurchaseInvoiceInitialPaid(inv, ledgerTransactions);
+      return {
+        id: inv.id,
+        date: inv.purchaseDate,
+        type: 'INVOICE',
+        title: `Purchase ${inv.invoiceNumber}`,
+        subtitle: `${inv.itemsCount} pcs`,
+        details: inv.itemsSummary,
+        debit: inv.totalAmount,
+        credit: initialPaid,
+        paymentMethod: inv.paymentMethod,
+        statusBadge: inv.status,
+        statusColor:
+          inv.status === 'Paid'
+            ? 'bg-emerald-100 text-emerald-800'
+            : inv.status === 'Partial'
+            ? 'bg-amber-100 text-amber-800'
+            : 'bg-red-100 text-red-800',
+        rawInvoice: inv,
+      };
+    }),
     ...supplierPayments.map((p): SupplierLedgerItem => ({
       id: p.id,
       date: p.date,
@@ -631,10 +644,13 @@ function SupplierLedgerModal({
       statusBadge: 'Paid',
       statusColor: 'bg-emerald-100 text-emerald-800',
     })),
-  ].sort((a, b) => b.date.localeCompare(a.date));
+  ].sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
 
   const totalPurchased = supplierInvoices.reduce((acc, i) => acc + i.totalAmount, 0);
-  const totalPaidDirect = supplierInvoices.reduce((acc, i) => acc + i.paidAmount, 0);
+  const totalPaidDirect = supplierInvoices.reduce(
+    (acc, i) => acc + getPurchaseInvoiceInitialPaid(i, ledgerTransactions),
+    0
+  );
   const totalPaidDues = supplierPayments.reduce((acc, p) => acc + p.amount, 0);
   const totalPaid = totalPaidDirect + totalPaidDues;
   const currentPayable = supplier.totalPayable;
@@ -865,6 +881,7 @@ export function PurchaseInvoiceView() {
   } = useErp();
 
   const [catFilter, setCatFilter] = useState<string>('All');
+  const [restockSearch, setRestockSearch] = useState('');
   const [supplierId, setSupplierId] = useState(() => suppliers[0]?.id || '');
   const [supplierName, setSupplierName] = useState(
     () => suppliers[0]?.companyName || 'Wholesale Supplier'
@@ -935,6 +952,16 @@ export function PurchaseInvoiceView() {
     setPaidAmount(String(nextTotal));
   };
 
+  const updateCartUnitCost = (productId: string, nextCost: number) => {
+    const safeCost = Math.max(0, nextCost || 0);
+    const nextCart = cart.map((item) =>
+      item.productId === productId ? { ...item, unitCost: safeCost } : item
+    );
+    setCart(nextCart);
+    const nextTotal = nextCart.reduce((acc, i) => acc + i.unitCost * i.quantity, 0);
+    setPaidAmount(String(nextTotal));
+  };
+
   const handleCreatePurchase = async (e: React.FormEvent) => {
     e.preventDefault();
     if (cart.length === 0) return;
@@ -946,7 +973,7 @@ export function PurchaseInvoiceView() {
         cartItems: cart,
         paidAmount: numPaid,
         paymentMethod,
-        purchaseDate: new Date().toISOString().slice(0, 10),
+        purchaseDate: getTodayBD(),
       });
       setCart([]);
       setPaidAmount('0');
@@ -962,9 +989,17 @@ export function PurchaseInvoiceView() {
     setSettleTarget(null);
   };
 
-  const filteredProducts = products.filter(
-    (p) => catFilter === 'All' || p.category === catFilter
-  );
+  const filteredProducts = products.filter((p) => {
+    const matchesCat = catFilter === 'All' || p.category === catFilter;
+    const q = restockSearch.trim().toLowerCase();
+    const matchesQ =
+      !q ||
+      p.name.toLowerCase().includes(q) ||
+      p.sku.toLowerCase().includes(q) ||
+      p.size.toLowerCase().includes(q) ||
+      p.color.toLowerCase().includes(q);
+    return matchesCat && matchesQ;
+  });
 
   const filteredPurchases = purchaseInvoices.filter((pur) => {
     const matchesStatus =
@@ -998,11 +1033,11 @@ export function PurchaseInvoiceView() {
             </p>
           </div>
 
-          <div className="flex gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <select
               value={catFilter}
               onChange={(e) => setCatFilter(e.target.value)}
-              className="flex-1 min-h-[44px] px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-base sm:text-xs font-semibold text-slate-800"
+              className="w-full min-h-[44px] px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-base sm:text-xs font-semibold text-slate-800"
             >
               <option value="All">All Categories ({products.length})</option>
               {allCategories.map((c) => (
@@ -1011,15 +1046,28 @@ export function PurchaseInvoiceView() {
                 </option>
               ))}
             </select>
-            <button
-              type="button"
-              onClick={() => setCameraScannerOpen(true)}
-              className="min-h-[44px] px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-sm shrink-0 transition-transform"
-              title="Scan Garment QR to Restock"
-            >
-              <Camera className="w-4 h-4" />
-              <span className="hidden sm:inline">Scan QR</span>
-            </button>
+
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={restockSearch}
+                  onChange={(e) => setRestockSearch(e.target.value)}
+                  placeholder="Search SKU, garment, size..."
+                  className="w-full min-h-[44px] pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-base sm:text-xs"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setCameraScannerOpen(true)}
+                className="min-h-[44px] px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-sm shrink-0 transition-transform"
+                title="Scan Garment QR to Restock"
+              >
+                <Camera className="w-4 h-4" />
+                <span className="hidden sm:inline">Scan QR</span>
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[380px] overflow-y-auto pr-1">
@@ -1100,38 +1148,54 @@ export function PurchaseInvoiceView() {
               cart.map((item) => (
                 <div
                   key={item.productId}
-                  className="flex items-center justify-between gap-2 bg-slate-50 px-3 py-2 rounded-xl text-xs"
+                  className="bg-slate-50 px-3 py-2.5 rounded-xl text-xs space-y-2 border border-slate-100"
                 >
-                  <div className="min-w-0">
-                    <p className="font-bold text-slate-900 truncate">{item.name}</p>
-                    <p className="text-[11px] text-slate-500 font-mono tabular-nums">
-                      Size {item.size} · Cost {formatBDT(item.unitCost, sym)}
-                    </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-bold text-slate-900 truncate">{item.name}</p>
+                      <p className="text-[11px] text-slate-500 font-mono tabular-nums">
+                        Size {item.size} · Line Total: {formatBDT(item.unitCost * item.quantity, sym)}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => updateCartQty(item.productId, item.quantity - 1)}
+                        className="w-7 h-7 rounded-lg border border-slate-200 bg-white flex items-center justify-center"
+                      >
+                        <Minus className="w-3 h-3" />
+                      </button>
+                      <input
+                        type="number"
+                        min="1"
+                        value={item.quantity}
+                        onChange={(e) =>
+                          updateCartQty(item.productId, Number(e.target.value) || 0)
+                        }
+                        className="w-14 h-7 rounded-lg border border-slate-200 bg-white text-center font-mono font-bold text-xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => updateCartQty(item.productId, item.quantity + 1)}
+                        className="w-7 h-7 rounded-lg border border-slate-200 bg-white flex items-center justify-center"
+                      >
+                        <Plus className="w-3 h-3" />
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => updateCartQty(item.productId, item.quantity - 1)}
-                      className="w-7 h-7 rounded-lg border border-slate-200 bg-white flex items-center justify-center"
-                    >
-                      <Minus className="w-3 h-3" />
-                    </button>
+                  <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-200/60">
+                    <span className="text-[11px] font-semibold text-slate-600">
+                      Unit Purchase Cost ({sym}):
+                    </span>
                     <input
                       type="number"
-                      min="1"
-                      value={item.quantity}
+                      min="0"
+                      value={item.unitCost}
                       onChange={(e) =>
-                        updateCartQty(item.productId, Number(e.target.value) || 0)
+                        updateCartUnitCost(item.productId, Number(e.target.value) || 0)
                       }
-                      className="w-14 h-7 rounded-lg border border-slate-200 bg-white text-center font-mono font-bold text-xs"
+                      className="w-24 h-7 px-2 rounded-lg border border-slate-200 bg-white text-right font-mono font-semibold text-xs"
                     />
-                    <button
-                      type="button"
-                      onClick={() => updateCartQty(item.productId, item.quantity + 1)}
-                      className="w-7 h-7 rounded-lg border border-slate-200 bg-white flex items-center justify-center"
-                    >
-                      <Plus className="w-3 h-3" />
-                    </button>
                   </div>
                 </div>
               ))
@@ -1156,7 +1220,7 @@ export function PurchaseInvoiceView() {
             <label className="block text-xs font-semibold text-slate-700 mb-1.5">
               Payment Method
             </label>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
               {PAYMENT_METHODS.map((m) => (
                 <button
                   type="button"
@@ -1355,7 +1419,15 @@ export function PurchaseInvoiceView() {
                     <span>Voucher</span>
                   </button>
                   <button
-                    onClick={() => deletePurchaseInvoice(pur.id)}
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `Delete Purchase Voucher ${pur.invoiceNumber}? Stock and supplier balances will be automatically reversed.`
+                        )
+                      ) {
+                        deletePurchaseInvoice(pur.id);
+                      }
+                    }}
                     className="min-h-[38px] min-w-[38px] rounded-xl border border-slate-200 text-slate-400 hover:text-red-600 flex items-center justify-center"
                     title="Delete Invoice"
                   >
@@ -1435,7 +1507,7 @@ export function PurchaseInvoiceView() {
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Payment Method
                 </label>
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
                   {PAYMENT_METHODS.map((m) => (
                     <button
                       type="button"
@@ -1477,7 +1549,12 @@ export function PurchaseInvoiceView() {
         isOpen={cameraScannerOpen}
         onClose={() => setCameraScannerOpen(false)}
         onScanItem={(product) => addRestockItem(product.id)}
+        onRemoveItem={(product) => {
+          const found = cart.find((c) => c.productId === product.id);
+          if (found) updateCartQty(product.id, found.quantity - 5);
+        }}
         continuousMode={true}
+        allowOutOfStock={true}
         title="Restock Garment Scanner"
         subtitle="Point camera at clothing tags to add to purchase restock"
       />

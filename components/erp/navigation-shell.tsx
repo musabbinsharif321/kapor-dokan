@@ -32,6 +32,8 @@ import { useErp } from '@/context/erp-context';
 import { ActiveModule, formatBDT } from '@/lib/types';
 import { QrCameraScannerModal } from './qr-camera-scanner-modal';
 import { generateQrDataUrl, encodeInvoiceQr } from '@/lib/qr-utils';
+import { bluetoothPrinter } from '@/lib/thermal-printer';
+import { Bluetooth, Share2, HelpCircle } from 'lucide-react';
 
 const MODULE_TITLES: Record<ActiveModule, { title: string; group: string; ctaLabel?: string }> = {
   dashboard: { title: 'Dashboard', group: 'Overview', ctaLabel: 'New Sale' },
@@ -68,6 +70,9 @@ export function NavigationShell({ children }: { children: React.ReactNode }) {
   const [purchaseExpanded, setPurchaseExpanded] = useState(true);
   const [globalScannerOpen, setGlobalScannerOpen] = useState(false);
   const [receiptQrUrl, setReceiptQrUrl] = useState<string>('');
+  const [btPrinting, setBtPrinting] = useState(false);
+  const [btPrinterName, setBtPrinterName] = useState<string | null>(null);
+  const [iosHelpOpen, setIosHelpOpen] = useState(false);
 
   useEffect(() => {
     const qrUrlPromise = printableReceipt?.invoiceNumber
@@ -88,9 +93,154 @@ export function NavigationShell({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const handlePrintReceipt = () => {
+  const escapeHtml = (raw: string | undefined | null) =>
+    String(raw ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+
+  const handleShareWhatsAppReceipt = () => {
     if (!printableReceipt) return;
     const printSym = storeSettings.currencySymbol || '৳';
+    const lines = [
+      `*${storeSettings.storeName || 'NEXT FIT'}*`,
+      storeSettings.address ? `${storeSettings.address}` : '',
+      `Invoice: *${printableReceipt.invoiceNumber}* (${printableReceipt.date})`,
+      `Customer: ${printableReceipt.partyName}`,
+      `------------------------`,
+      ...printableReceipt.itemsSummary.split(' · ').map((l) => `• ${l}`),
+      `------------------------`,
+      printableReceipt.discount > 0
+        ? `Subtotal: ${printSym}${printableReceipt.subtotal.toLocaleString()}\nDiscount: -${printSym}${printableReceipt.discount.toLocaleString()}`
+        : '',
+      `*Grand Total: ${printSym}${printableReceipt.grandTotal.toLocaleString()}*`,
+      `Paid (${printableReceipt.paymentMethod}): ${printSym}${printableReceipt.paidAmount.toLocaleString()}`,
+      printableReceipt.dueAmount > 0
+        ? `*Balance Due: ${printSym}${printableReceipt.dueAmount.toLocaleString()}*`
+        : 'Status: Paid in Full',
+      storeSettings.invoiceFooterNote ? `\n_${storeSettings.invoiceFooterNote}_` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const rawPhone = (printableReceipt.partyPhone || '').replace(/[^0-9]/g, '');
+    const bdPhone =
+      rawPhone.length === 11 && rawPhone.startsWith('01')
+        ? `88${rawPhone}`
+        : rawPhone.length >= 10
+        ? rawPhone
+        : '';
+    const url = bdPhone
+      ? `https://wa.me/${bdPhone}?text=${encodeURIComponent(lines)}`
+      : `https://wa.me/?text=${encodeURIComponent(lines)}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleShareToIosPrinterApp = async () => {
+    if (!printableReceipt) return;
+    const printSym = storeSettings.currencySymbol || '৳';
+    const textReceipt = [
+      `================================`,
+      `       ${(storeSettings.storeName || 'NEXT FIT').toUpperCase()}       `,
+      storeSettings.tagline ? `    ${storeSettings.tagline}    ` : '',
+      storeSettings.address ? `  ${storeSettings.address}  ` : '',
+      storeSettings.phone ? `    Tel: ${storeSettings.phone}    ` : '',
+      `================================`,
+      `Invoice: ${printableReceipt.invoiceNumber}`,
+      `Date: ${printableReceipt.date}`,
+      `Customer: ${printableReceipt.partyName}`,
+      printableReceipt.partyPhone ? `Phone: ${printableReceipt.partyPhone}` : '',
+      `--------------------------------`,
+      `ITEM / QTY                AMOUNT`,
+      `--------------------------------`,
+      ...printableReceipt.itemsSummary.split(' · '),
+      `--------------------------------`,
+      printableReceipt.discount > 0 ? `Subtotal:      ${printSym}${printableReceipt.subtotal.toLocaleString()}` : '',
+      printableReceipt.discount > 0 ? `Discount:     -${printSym}${printableReceipt.discount.toLocaleString()}` : '',
+      `GRAND TOTAL:   ${printSym}${printableReceipt.grandTotal.toLocaleString()}`,
+      `Paid (${printableReceipt.paymentMethod}):   ${printSym}${printableReceipt.paidAmount.toLocaleString()}`,
+      printableReceipt.dueAmount > 0
+        ? `BALANCE DUE:   ${printSym}${printableReceipt.dueAmount.toLocaleString()}`
+        : `Payment Status: PAID IN FULL`,
+      `================================`,
+      storeSettings.invoiceFooterNote ? `${storeSettings.invoiceFooterNote}` : '',
+      `Thank you for shopping with us!`,
+      `================================`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    // Check if Web Share API is available (iOS Safari, Android Chrome)
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({
+          title: `Receipt ${printableReceipt.invoiceNumber}`,
+          text: textReceipt,
+        });
+        return;
+      } catch (err: any) {
+        if (err.name !== 'AbortError') {
+          console.warn('Share error:', err);
+        }
+      }
+    }
+
+    // Fallback if Web Share is cancelled or not supported
+    try {
+      await navigator.clipboard.writeText(textReceipt);
+      alert('Receipt copied to clipboard! You can now paste it into your iOS thermal printer app.');
+    } catch {
+      window.print();
+    }
+  };
+
+  const handleDirectBluetoothPrint = async () => {
+    if (!printableReceipt) return;
+    setBtPrinting(true);
+    try {
+      if (!bluetoothPrinter.isConnected()) {
+        const name = await bluetoothPrinter.connect();
+        setBtPrinterName(name);
+      }
+
+      await bluetoothPrinter.printReceipt({
+        storeName: storeSettings.storeName || 'NEXT FIT',
+        tagline: storeSettings.tagline,
+        address: storeSettings.address,
+        phone: storeSettings.phone,
+        invoiceNumber: printableReceipt.invoiceNumber,
+        date: printableReceipt.date,
+        partyName: printableReceipt.partyName,
+        partyPhone: printableReceipt.partyPhone,
+        itemsSummary: printableReceipt.itemsSummary,
+        itemsCount: printableReceipt.itemsCount,
+        subtotal: printableReceipt.subtotal,
+        discount: printableReceipt.discount,
+        grandTotal: printableReceipt.grandTotal,
+        paidAmount: printableReceipt.paidAmount,
+        dueAmount: printableReceipt.dueAmount,
+        paymentMethod: printableReceipt.paymentMethod,
+        footerNote: storeSettings.invoiceFooterNote,
+      });
+
+      alert('Printed successfully via Bluetooth to MP-58T!');
+    } catch (err: any) {
+      console.error('Bluetooth print error:', err);
+      // If Web Bluetooth is unsupported on iOS Safari, show the helper modal
+      if (!bluetoothPrinter.isSupported()) {
+        setIosHelpOpen(true);
+      } else {
+        alert(err.message || 'Could not print via Bluetooth. Ensure printer is turned ON and nearby.');
+      }
+    } finally {
+      setBtPrinting(false);
+    }
+  };
+
+  const handlePrintReceipt = () => {
+    if (!printableReceipt) return;
+    const printSym = escapeHtml(storeSettings.currencySymbol || '৳');
     const printWindow = window.open('', '_blank', 'width=380,height=600');
     if (!printWindow) {
       window.print();
@@ -103,7 +253,7 @@ export function NavigationShell({ children }: { children: React.ReactNode }) {
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Receipt ${printableReceipt.invoiceNumber} - ${storeSettings.storeName}</title>
+  <title>Receipt ${escapeHtml(printableReceipt.invoiceNumber)} - ${escapeHtml(storeSettings.storeName)}</title>
   <style>
     @page {
       size: 58mm auto;
@@ -197,10 +347,10 @@ export function NavigationShell({ children }: { children: React.ReactNode }) {
 </head>
 <body>
   <div class="text-center">
-    <div class="store-name">${storeSettings.storeName || 'NEXT FIT'}</div>
-    ${storeSettings.tagline ? `<div class="store-sub">${storeSettings.tagline}</div>` : ''}
-    ${storeSettings.address ? `<div class="store-sub">${storeSettings.address}</div>` : ''}
-    <div class="store-sub font-bold">Tel: ${storeSettings.phone || ''}</div>
+    <div class="store-name">${escapeHtml(storeSettings.storeName || 'NEXT FIT')}</div>
+    ${storeSettings.tagline ? `<div class="store-sub">${escapeHtml(storeSettings.tagline)}</div>` : ''}
+    ${storeSettings.address ? `<div class="store-sub">${escapeHtml(storeSettings.address)}</div>` : ''}
+    <div class="store-sub font-bold">Tel: ${escapeHtml(storeSettings.phone || '')}</div>
   </div>
 
   <div class="dashed-divider"></div>
@@ -208,14 +358,14 @@ export function NavigationShell({ children }: { children: React.ReactNode }) {
   <div class="row">
     <div>
       <div style="font-size: 9px; color: #555;">${printableReceipt.type === 'PURCHASE' ? 'Supplier' : 'Customer'}</div>
-      <div class="font-bold">${printableReceipt.partyName}</div>
-      ${printableReceipt.partyPhone ? `<div>${printableReceipt.partyPhone}</div>` : ''}
-      ${printableReceipt.originalInvoiceNumber ? `<div style="font-size: 9px;">Ref: ${printableReceipt.originalInvoiceNumber}</div>` : ''}
+      <div class="font-bold">${escapeHtml(printableReceipt.partyName)}</div>
+      ${printableReceipt.partyPhone ? `<div>${escapeHtml(printableReceipt.partyPhone)}</div>` : ''}
+      ${printableReceipt.originalInvoiceNumber ? `<div style="font-size: 9px;">Ref: ${escapeHtml(printableReceipt.originalInvoiceNumber)}</div>` : ''}
     </div>
     <div class="text-right">
-      <div class="font-bold" style="font-size: 11.5px;">${printableReceipt.invoiceNumber}</div>
-      <div style="font-size: 9.5px;">${printableReceipt.date}</div>
-      <div style="font-size: 9.5px;">${printableReceipt.paymentMethod} · ${printableReceipt.status}</div>
+      <div class="font-bold" style="font-size: 11.5px;">${escapeHtml(printableReceipt.invoiceNumber)}</div>
+      <div style="font-size: 9.5px;">${escapeHtml(printableReceipt.date)}</div>
+      <div style="font-size: 9.5px;">${escapeHtml(printableReceipt.paymentMethod)} · ${escapeHtml(printableReceipt.status)}</div>
     </div>
   </div>
 
@@ -225,8 +375,8 @@ export function NavigationShell({ children }: { children: React.ReactNode }) {
     <div class="row" style="font-size: 9px; font-weight: bold; margin-bottom: 4px;">
       <span>ITEMS (${printableReceipt.itemsCount} pcs)</span>
     </div>
-    ${items.map((line: string) => `<div class="item-line">• ${line}</div>`).join('')}
-    ${printableReceipt.returnReason ? `<div style="font-size: 9px; margin-top: 3px;"><b>Reason:</b> ${printableReceipt.returnReason}</div>` : ''}
+    ${items.map((line: string) => `<div class="item-line">• ${escapeHtml(line)}</div>`).join('')}
+    ${printableReceipt.returnReason ? `<div style="font-size: 9px; margin-top: 3px;"><b>Reason:</b> ${escapeHtml(printableReceipt.returnReason)}</div>` : ''}
   </div>
 
   <div class="dashed-divider"></div>
@@ -239,7 +389,7 @@ export function NavigationShell({ children }: { children: React.ReactNode }) {
       </div>
       <div class="row">
         <span>Settlement Mode</span>
-        <span>${printableReceipt.paymentMethod}</span>
+        <span>${escapeHtml(printableReceipt.paymentMethod)}</span>
       </div>
     ` : `
       <div class="row">
@@ -256,7 +406,7 @@ export function NavigationShell({ children }: { children: React.ReactNode }) {
         <span>${printSym}${printableReceipt.grandTotal.toLocaleString()}</span>
       </div>
       <div class="row">
-        <span>Paid Amount (${printableReceipt.paymentMethod})</span>
+        <span>Paid Amount (${escapeHtml(printableReceipt.paymentMethod)})</span>
         <span class="font-bold">${printSym}${printableReceipt.paidAmount.toLocaleString()}</span>
       </div>
       <div class="row">
@@ -275,7 +425,7 @@ export function NavigationShell({ children }: { children: React.ReactNode }) {
   ` : ''}
 
   ${storeSettings.invoiceFooterNote ? `
-  <div class="footer-note">${storeSettings.invoiceFooterNote}</div>
+  <div class="footer-note">${escapeHtml(storeSettings.invoiceFooterNote)}</div>
   ` : ''}
 
   <script>
@@ -416,6 +566,18 @@ export function NavigationShell({ children }: { children: React.ReactNode }) {
               >
                 <FileText className="w-3.5 h-3.5 shrink-0" />
                 <span>Sales Invoice</span>
+              </button>
+
+              <button
+                onClick={() => handleSelectModule('sales-returns')}
+                className={`w-full min-h-[42px] px-3 py-2 rounded-lg flex items-center gap-2.5 text-xs font-medium transition-colors whitespace-nowrap ${
+                  activeModule === 'sales-returns'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-400 hover:bg-slate-800/70 hover:text-white'
+                }`}
+              >
+                <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                <span>Returns & Exchange</span>
               </button>
             </div>
           )}
@@ -668,6 +830,14 @@ export function NavigationShell({ children }: { children: React.ReactNode }) {
               >
                 <Printer className="w-3.5 h-3.5" />
                 <span>Print Report</span>
+              </button>
+            ) : activeModule === 'purchase-supplier' ? (
+              <button
+                onClick={() => handleSelectModule('purchase-invoice')}
+                className="min-h-[40px] px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-xs transition-all whitespace-nowrap shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+                <span>{currentMeta.ctaLabel || 'New Purchase'}</span>
               </button>
             ) : activeModule !== 'sales-invoice' ? (
               <button
@@ -951,19 +1121,71 @@ export function NavigationShell({ children }: { children: React.ReactNode }) {
               )}
             </div>
 
-            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center gap-3 print:hidden">
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col gap-2.5 print:hidden">
+              {/* Primary Bluetooth Print Row */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleDirectBluetoothPrint}
+                  disabled={btPrinting}
+                  className="flex-1 min-h-[46px] px-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm transition-all"
+                >
+                  <Bluetooth className={`w-4 h-4 ${btPrinting ? 'animate-spin' : ''}`} />
+                  <span>
+                    {btPrinting
+                      ? 'Connecting & Printing...'
+                      : btPrinterName
+                      ? `Print via ${btPrinterName}`
+                      : 'Direct Bluetooth Print (MP-58T)'}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIosHelpOpen(true)}
+                  className="min-h-[46px] px-3 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold flex items-center gap-1 shrink-0"
+                  title="iOS Printer Setup Guide"
+                >
+                  <HelpCircle className="w-4 h-4 text-indigo-600" />
+                  <span className="hidden sm:inline">iOS Guide</span>
+                </button>
+              </div>
+
+              {/* Secondary Options: iOS App Share, WhatsApp, Web 58mm Print */}
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={handleShareToIosPrinterApp}
+                  className="min-h-[42px] px-2 rounded-xl bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                  title="Send to iPhone Printer App (DLabel, Thermer, POS-Printer)"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span className="truncate">iOS App Share</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleShareWhatsAppReceipt}
+                  className="min-h-[42px] px-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <span className="truncate">WhatsApp</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handlePrintReceipt}
+                  className="min-h-[42px] px-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span className="truncate">AirPrint (58mm)</span>
+                </button>
+              </div>
+
               <button
+                type="button"
                 onClick={() => setPrintableReceipt(null)}
-                className="flex-1 min-h-[46px] rounded-xl border border-slate-300 bg-white text-slate-700 font-semibold text-sm hover:bg-slate-50"
+                className="w-full min-h-[38px] rounded-xl border border-slate-200 bg-white text-slate-500 font-medium text-xs hover:bg-slate-50"
               >
-                Close
-              </button>
-              <button
-                onClick={handlePrintReceipt}
-                className="flex-1 min-h-[46px] rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-sm"
-              >
-                <Printer className="w-4 h-4" />
-                <span>Print 58mm Receipt</span>
+                Close Receipt
               </button>
             </div>
           </div>
@@ -978,6 +1200,75 @@ export function NavigationShell({ children }: { children: React.ReactNode }) {
         title="POS Garment Barcode & QR Scanner"
         subtitle="Point camera at tags to continuously add multiple garments to POS"
       />
+
+      {/* iOS Bluetooth Printer (MP-58T) User Setup Guide Modal */}
+      {iosHelpOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-end sm:items-center justify-center p-3 sm:p-4">
+          <div className="bg-white w-full sm:max-w-md rounded-3xl p-5 sm:p-6 space-y-4 shadow-2xl border border-slate-200">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                  <Bluetooth className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm sm:text-base">
+                    iPhone-এ MP-58T প্রিন্টার কানেকশন গাইড
+                  </h3>
+                  <p className="text-[11px] text-slate-500">iOS Bluetooth Thermal Setup</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIosHelpOpen(false)}
+                className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-700 leading-relaxed">
+              <div className="p-3 bg-amber-50 rounded-2xl border border-amber-200/80">
+                <p className="font-bold text-amber-900 mb-1">
+                  💡 অ্যাপল (Apple)-এর ব্লুটুথ নিয়ম:
+                </p>
+                <p className="text-amber-800 text-[11px]">
+                  iPhone-এর সাধারণ Safari ব্রাউজার সরাসরি ব্লুটুথ ডিভাইস ব্লক করে রাখে। তাই নিচের যেকোনো ১টি উপায়ে সহজে প্রিন্ট করতে পারবেন:
+                </p>
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-1.5">
+                <p className="font-bold text-slate-900 text-xs">
+                  পদ্ধতি ১: ১-ক্লিকে ব্লুটুথ প্রিন্ট (Bluefy Browser)
+                </p>
+                <p className="text-slate-600 text-[11px]">
+                  ১. iPhone App Store থেকে সম্পূর্ণ ফ্রি <strong>&quot;Bluefy – Web BLE Browser&quot;</strong> অ্যাপটি নামিয়ে নিন।<br />
+                  ২. এই অ্যাপের ভেতর আমাদের ERP ওয়েবসাইটের লিংকে ঢুকুন।<br />
+                  ৩. <strong>&quot;Direct Bluetooth Print&quot;</strong> বাটনে চাপলেই MP-58T পেয়ে যাবে এবং সরাসরি প্রিন্ট হবে!
+                </p>
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-1.5">
+                <p className="font-bold text-slate-900 text-xs">
+                  পদ্ধতি ২: সাধারণ Safari ব্রাউজার ব্যবহার করলে (iOS App Share)
+                </p>
+                <p className="text-slate-600 text-[11px]">
+                  ১. আপনি বর্তমানে যে অ্যাপ দিয়ে প্রিন্টারে টেস্ট করেছেন (যেমন: <em>DLabel, Thermer বা WalkPrint</em>) সেটি চালু রাখুন।<br />
+                  ২. ইনভয়েসের <strong>&quot;iOS App Share&quot;</strong> বাটনে চাপ দিন।<br />
+                  ৩. শেয়ার লিস্ট থেকে আপনার প্রিন্টার অ্যাপটি সিলেক্ট করলেই রসিদ প্রিন্ট হয়ে যাবে।
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIosHelpOpen(false)}
+              className="w-full min-h-[44px] rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs"
+            >
+              বুঝেছি, বন্ধ করুন
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

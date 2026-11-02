@@ -134,7 +134,7 @@ export function parseScannedCode(rawText: string): ScannedCodeResult {
     };
   }
 
-  if (text.startsWith('ORD-')) {
+  if (text.startsWith('ORD-') || text.startsWith('SO-')) {
     return {
       raw: text,
       type: 'ORDER',
@@ -150,6 +150,8 @@ export function parseScannedCode(rawText: string): ScannedCodeResult {
   };
 }
 
+let sharedAudioCtx: AudioContext | null = null;
+
 /**
  * Mobile-friendly Audio Beep using Web Audio API on successful scan
  */
@@ -160,7 +162,13 @@ export function playScanSound() {
       window.AudioContext ||
       (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextClass) return;
-    const ctx = new AudioContextClass();
+    if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
+      sharedAudioCtx = new AudioContextClass();
+    }
+    if (sharedAudioCtx.state === 'suspended') {
+      sharedAudioCtx.resume().catch(() => {});
+    }
+    const ctx = sharedAudioCtx;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
 
